@@ -35,6 +35,7 @@ library(lubridate)
 library(stringr)
 library(readr)
 library(ggplot2)
+library(plotly)
 library(openxlsx)
 library(readxl)
 library(tictoc)
@@ -363,7 +364,7 @@ toc()
 ## Mapeo de variables
 
 ```{r}
-
+# si contamos con un diccionario de datos, la parte de definir que tipo de datos es cada variable, se puede omitir o simplemente al transformar, contejar que la data quede OK
 cat("Número de filas: ",nrow(df_original))
 cat("\nNúmero de columnas: ",ncol(df_original))
 
@@ -460,6 +461,49 @@ variables_descriptivo$Es_Categorica <- ifelse(test = variables_descriptivo$Tipo_
                                               yes = "SI",
                                               no = "NO")
 
+data_plot_NAs <- variables_descriptivo %>% 
+                          dplyr::filter(Cant_Filas_NA > 0) %>% 
+                          dplyr::arrange(Cant_Filas_NA) %>% 
+                          dplyr::mutate(Porcentaje = Cant_Filas_NA / nrow(df_original) * 100,
+                                        Variable = factor(Variable,levels = unique(Variable)))
+
+plot_NAs <- data_plot_NAs %>% 
+                  ggplot(aes(x = Variable,y = Porcentaje)) +
+                  theme_minimal() +
+                  coord_flip() +
+                  geom_bar(stat = "identity") +
+                  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Formatear y como porcentaje
+                  geom_text(aes(label = paste0(round(Porcentaje, 1), "% (",Cant_Filas_NA,"/",nrow(df_original),")")), 
+                            position = position_stack(vjust = 0.5), 
+                            color = "white",
+                            size = 3.5) +
+                  labs(title = "Porcentaje de filas en NA por variable",x = NULL, y = NULL)
+
+ plot_NAs <- ggplotly(p = plot_NAs,tooltip = "",height = 20 * n_distinct(variables_descriptivo$Variable),width = 1000)
+
+plot_NAs
+
+data_plot_unique_val <- variables_descriptivo %>%  
+                          dplyr::arrange(Cant_Valores_Unicos) %>% 
+                          dplyr::mutate(Porcentaje = Cant_Valores_Unicos / nrow(df_original) * 100,
+                                        Variable = factor(Variable,levels = unique(Variable)))
+
+plot_unique_val <- data_plot_unique_val %>% 
+                  ggplot(aes(x = Variable,y = Porcentaje)) +
+                  theme_minimal() +
+                  coord_flip() +
+                  geom_bar(stat = "identity") +
+                  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Formatear y como porcentaje
+                  geom_text(aes(label = paste0(round(Porcentaje, 1), "% (",Cant_Valores_Unicos,"/",nrow(df_original),")")), 
+                            position = position_stack(vjust = 0.5), 
+                            color = "white",
+                            size = 2.5) +
+                  labs(title = "Porcentaje de Valores únicos por variable",x = NULL, y = NULL)
+
+plot_unique_val <- ggplotly(p = plot_unique_val,tooltip = "",height = 20 * n_distinct(variables_descriptivo$Variable),width = 1000)
+
+plot_unique_val
+
 ```
 
 ## Transformación variables
@@ -514,3 +558,5 @@ if (length(variables_date) > 0) {
 
 
 ```
+
+
