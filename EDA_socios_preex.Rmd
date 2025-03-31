@@ -1,0 +1,516 @@
+---
+title: "Score Socios con Preexistencias"
+output: 
+  html_document:
+     toc: yes
+     code_folding: hide
+     toc_float: yes
+     df_print: paged
+     theme: united
+     code_download: true
+     warning: FALSE
+date: "`r format(Sys.time(), '%d-%m-%Y')`"
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(
+        inputFile, encoding = encoding,
+        output_file = file.path(
+            dirname(inputFile), paste0('EDA_Score_socios_preex_',Sys.Date(),'.html')))
+    })
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+
+
+```{r,echo=FALSE}
+#Carga de Librerias y funciones
+
+library(odbc)
+library(DBI)
+library(tidyverse)  # para dplyr
+library(lubridate)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(openxlsx)
+library(readxl)
+library(tictoc)
+library(gridExtra)
+library(writexl)
+library(kableExtra)
+library(stringr)
+library(corrplot)
+library(solitude)
+library(isotree)
+library(dbscan)
+library(scales)
+library(rgl)
+
+```
+
+```{r,echo=FALSE}
+# Función SQLQueryIn con maximo 30
+
+# Funcion para armar dinamicamente una consulta que viajara al
+# motor SQL en la cual se necesita traer datos asociados a un conjunto
+# de valores en formato "in (...)"
+
+# Parametros:
+# conn: conexion a SQL
+# values: vector con los valores a consultar
+# qry: consulta sql. En el lugar donde va la lista de valores reemplazar por 
+# el caracter "#"
+
+sqlQueryIn <- function(conn,values,qry){
+  f <- function(x, output) {
+    xx <- paste(x,collapse=",")
+    q <- gsub("#",xx,qry)
+    q <- str_replace_all(str_replace_all(q,"\n",""),"\\s+"," ")
+    output <- sqlQuery(conn,q)
+  }
+  
+  max <- 30
+  if (class(values)=="character"){n
+    values <- paste("'",values,"'",sep="")
+  }
+  x <- seq_along(values)
+  values.sp <- split(values, ceiling(x/max))
+  result <- lapply(values.sp, f)
+  result <- as.data.frame(do.call(rbind, result))
+}
+
+#Función para establecer la conexión a SQL Server
+conectar_sql <- function(dsn, database, uid, pwd, timeout = 10) {
+  con <- dbConnect(odbc::odbc(),
+                   dsn,
+                   database = database,
+                   uid = uid,
+                   pwd = pwd,
+                   timeout = timeout)
+  return(con)
+}
+
+# Levantamos la funcion con encoding
+funserver <- Sys.getenv("RFUN_PATH")
+source(paste0(funserver,"/sqlQueryIn.R"))
+source(paste0(funserver,"/my_sqlQuery_encoding.R"))
+
+```
+
+
+# Lectura de datos
+
+Redefinición de nombres de columnas
+¿Cuál es tu sexo? as Pregunta_1
+¿Estás embarazada?] as Pregunta_2
+¿Cuál es la fecha de tu última menstruación? as Pregunta_3
+¿Te realizaste análisis en el último año? as Pregunta_4
+¿Los resultados fueron normales? as Pregunta_5
+¿Cuál fue el diagnóstico? as Pregunta_6
+¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol? as Pregunta_7
+¿Qué patología de visión presenta? as Pregunta_8
+¿Tenés o tuviste alguna de las siguientes patologías? as Pregunta_9
+¿Qué patología de audición presenta? as Pregunta_10
+¿Qué patología hereditaria presenta? as Pregunta_11
+Alguna patologia que no este en el listado de visión as Pregunta_12
+¿Qué patología psiquiátrica presenta? as Pregunta_13
+Graduación de miopía as Pregunta_14
+¿Te realizaron cirugías? as Pregunta_15
+¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico? as Pregunta_16
+¿Cuál fue el año de la intervención del Sistema Nervioso? as Pregunta_17
+¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico? as Pregunta_18
+¿Cuál fue el año de la intervención Abdominal? as Pregunta_19
+¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico? as Pregunta_20
+¿Cuál fue el año de la intervención Sistema endocrino? as Pregunta_21
+¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico? as Pregunta_22
+¿Cuál fue el año de la intervención Cardiológica? as Pregunta_23
+¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico? as Pregunta_24
+¿Cuál fue el año de la intervención Ginecológica? as Pregunta_25
+¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico? as Pregunta_26
+¿Cuál fue el año de la intervención Traumatológica? as Pregunta_27
+¿Tiene protesis? as Pregunta_28
+¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico? as Pregunta_29
+¿Cuál fue el año de la intervención Otras? as Pregunta_30
+¿Que cirugía del listado? as Pregunta_31
+¿Tuviste, tenés o estás tramitando algún certificado de discapacidad? as Pregunta_32
+Fecha baja certificado discapacidad as Fecha_Baja_Cert_Disca
+Diagnóstico discapacidad as Diag_Disca
+Fecha alta certificado discapacidad as Fecha_Alta_Cert_Disca
+¿Te encontrás realizando alguno de los siguientes tratamientos? as Pregunta_33
+¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses? as Pregunta_34
+¿Que tratamiento tienes pensado hacer? as Pregunta_35
+DDJJ_Completa
+¿Tienes alguna patología? as Pregunta_36
+¿Padecés alguna/s patología/s además de las mencionadas anteriormente? as Pregunta_37
+¿Tuviste internaciones? as Pregunta_38
+Cuantas internaciones tuvo as Pregunta_39
+Motivo de la internación as Pregunta_40
+¿Cuál fue el año de la internación? as Pregunta_41
+
+```{r}
+# conn <- dbConnect(odbc::odbc(),
+#                       Driver = "ODBC Driver 17 for SQL Server",  
+#                       Server = "DWDATAMART.OSDE.AR",
+#                       Database = "DBPresupuestos",
+#                       Port = 1433,            
+#                       encoding = "UTF-8") 
+# no funcionan
+# pregunta_6
+# 
+# preguntas <- c("
+#       ,[¿Cuál es tu sexo?] as Pregunta_1",
+#       ",[¿Estás embarazada?] as Pregunta_2",
+#       ",[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3",
+#       ",[¿Te realizaste análisis en el último año?] as Pregunta_4",
+#       ",[¿Los resultados fueron normales?] as Pregunta_5",
+#       ",[¿Cuál fue el diagnóstico?] as Pregunta_6",
+#       ",[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7",
+#       ",[¿Qué patología de visión presenta?] as Pregunta_8",
+#       ",[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9",
+#       ",[¿Qué patología de audición presenta?] as Pregunta_10",
+#       ",[¿Qué patología hereditaria presenta?] as Pregunta_11",
+#       ",[Alguna patologia que no este en el listado de visión] as Pregunta_12",
+#       ",[¿Qué patología psiquiátrica presenta?] as Pregunta_13",
+#       ",[Graduación de miopía] as Pregunta_14",
+#       ",[¿Te realizaron cirugías?] as Pregunta_15",
+#       ",[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16",
+#       ",[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17",
+#       ",[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18",
+#       ",[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19",
+#       ",[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20",
+#       ",[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21",
+#       ",[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22",
+#       ",[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23",
+#       ",[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24",
+#       ",[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25",
+#       ",[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26",
+#       ",[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27",
+#       ",[¿Tiene protesis?] as Pregunta_28",
+#       ",[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29",
+#       ",[¿Cuál fue el año de la intervención Otras?] as Pregunta_30",
+#       ",[¿Que cirugía del listado?] as Pregunta_31",
+#       ",[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32",
+#       ",[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca",
+#       ",[Diagnóstico discapacidad] as Diag_Disca",
+#       ",[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca",
+#       ",[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33",
+#       ",[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34",
+#       ",[¿Que tratamiento tienes pensado hacer?] as Pregunta_35",
+#       ",[¿Tienes alguna patología?] as Pregunta_36",
+#       ",[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37",
+#       ",[¿Tuviste internaciones?] as Pregunta_38",
+#       ",[Cuantas internaciones tuvo] as Pregunta_39",
+#       ",[Motivo de la internación] as Pregunta_40",
+#       ",[¿Cuál fue el año de la internación?] as Pregunta_41")
+
+query_text1 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[DCOD_PLAN_ALTA_f1]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[Composición Familiar] as Composicion_Familiar
+      ,[DNUM_CUIT_EMPRESA]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_TITULAR_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+query_text2 <- paste0("SELECT TOP 1000 [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_GF_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+tic()
+df_original <- my_sqlQuery_encoding(2,query_text1)
+toc()
+
+tic()
+data_gf <- my_sqlQuery_encoding(2,query_text2)
+toc()
+
+
+
+```
+## Mapeo de variables
+
+```{r}
+
+cat("Número de filas: ",nrow(df_original))
+cat("\nNúmero de columnas: ",ncol(df_original))
+
+variables_descriptivo <- colSums(is.na(df_original)) %>% 
+                      as.data.frame()
+
+variables_descriptivo$Variable <- rownames(variables_descriptivo)
+rownames(variables_descriptivo) <- NULL
+variables_descriptivo$Cant_Filas_NA <- variables_descriptivo[,1]
+variables_descriptivo <- variables_descriptivo[,-1]
+
+variables_descriptivo$Tipo_Variable <- NA
+variables_descriptivo$Cant_Valores_Unicos <- NA
+variables_descriptivo$Cant_Filas_Cadena_Nula <- NA
+
+# recorro todas las columnas del dataframe original
+for (i in 1:ncol(df_original)) {
+  
+  # quito las filas que tienen NA en la columna que estamos chequeando
+  data_sin_na <- df_original[!is.na(df_original[,variables_descriptivo$Variable[i]]),]
+  
+  # defino el tipo de dato segun la funcion 'class'
+  # despues especifico mas en el caso de las numericas
+  variables_descriptivo$Tipo_Variable[i] <- class(data_sin_na[,variables_descriptivo$Variable[i]])
+  
+  # contabilizo el numero de valores distintos (sin NA)
+  variables_descriptivo$Cant_Valores_Unicos[i] <- n_distinct(data_sin_na[,variables_descriptivo$Variable[i]])
+  
+  # cuando convierto a numerica, cuento la cantidad de veces que queda como NA
+  # si la cantidad es minima, entonces la variable es numerica
+  # si no, era character y la dejo asi
+  variable_es_numerica <- sum(is.na(as.numeric(data_sin_na[,variables_descriptivo$Variable[i]])))/nrow(data_sin_na) < 0.001
+  
+  # en caso de ser numerica, actualizo el tipo de dato
+  if (variable_es_numerica) {
+    variables_descriptivo[i,]$Tipo_Variable <- "numeric"
+  }
+  
+  # cuando es numerica, determinamos si es entera o float (discreta o continua)
+  # para luego especificar mejor los graficos a realizar
+  if (variables_descriptivo[i,]$Tipo_Variable == "numeric") {
+    
+    # convierto la columna a integer
+    convierto_entero <- as.integer(data_sin_na[,variables_descriptivo$Variable[i]])
+    
+    # convierto la columna a numeric
+    original_numeric <- as.numeric(data_sin_na[,variables_descriptivo$Variable[i]])
+    
+    # cuento la cantidad de casos donde quedan igual, lo que significa que truncar la parte decimal
+    # no afecta
+    cant_casos <- sum(convierto_entero == original_numeric)
+    
+    # si a todos les pasa eso, es integer
+    # si alguno no cumple, tiene que ser float
+    variable_es_integer <- cant_casos == nrow(data_sin_na)
+    
+    if (variable_es_integer) {
+      variables_descriptivo[i,]$Tipo_Variable <- "integer"
+    }else{
+      variables_descriptivo[i,]$Tipo_Variable <- "float"
+    }
+  }
+  rm(convierto_date,convierto_date_error)
+  # verifico si alguna de las integer se puede convertir en fecha
+  if (variables_descriptivo[i,]$Tipo_Variable == "integer") {
+    # convierto la columna a date
+    convierto_date <- tryCatch(expr = {as.Date.character(x = data_sin_na[,variables_descriptivo$Variable[i]],tryFormats = "%Y%m%d")},
+             error = function(cond){
+               return(TRUE)})
+    
+    if (!isTRUE(convierto_date)) {
+      if (sum(is.na(convierto_date)) < 0.001){
+        variables_descriptivo[i,]$Tipo_Variable <- "date"
+      }
+    }
+  }
+  
+  # si la variable era character, cuento la cantidad de veces en que vino como ""
+  if (class(df_original[,variables_descriptivo$Variable[i]]) == "character") {
+    variables_descriptivo$Cant_Filas_Cadena_Nula[i] <- sum(data_sin_na[,variables_descriptivo$Variable[i]] == "")   
+  }else{
+    variables_descriptivo$Cant_Filas_Cadena_Nula[i] <- 0
+  }
+  
+  
+}
+
+
+variables_descriptivo$Es_ID <- ifelse(test = variables_descriptivo$Cant_Valores_Unicos == nrow(df_original),
+                                      yes = "SI",
+                                      no = "NO")
+
+variables_descriptivo$Es_Categorica <- ifelse(test = variables_descriptivo$Tipo_Variable %in% c("integer","character") & variables_descriptivo$Cant_Valores_Unicos < 20,
+                                              yes = "SI",
+                                              no = "NO")
+
+```
+
+## Transformación variables
+
+```{r}
+# traigo los nombres de las variables integer, de las float y de las date
+variables_enteras <- variables_descriptivo %>% 
+                            dplyr::filter(Tipo_Variable == "integer") %>% 
+                            dplyr::pull(Variable) %>% 
+                            unique()
+
+variables_float <- variables_descriptivo %>% 
+                            dplyr::filter(Tipo_Variable == "float") %>% 
+                            dplyr::pull(Variable) %>% 
+                            unique()
+
+variables_date <- variables_descriptivo %>% 
+                            dplyr::filter(Tipo_Variable == "date") %>% 
+                            dplyr::pull(Variable) %>% 
+                            unique()
+
+# defino un nuevo df para aplicar las transformaciones a los tipos de datos correctos
+df_transformado <- df_original
+
+# si hay variables integer, puedo aplicar transformaciones integer
+if (length(variables_enteras) > 0) {
+  if (length(variables_enteras) > 1) {
+    df_transformado[,variables_enteras] <- apply(X = df_transformado %>% 
+                                                        dplyr::select_at(variables_enteras),MARGIN = 2,FUN = as.integer)
+  }else{
+    df_transformado[,variables_enteras] <- as.integer(df_transformado[,variables_enteras])
+  }
+}
+
+# si hay variables float, puedo aplicar transformaciones numeric
+if (length(variables_float) > 0) {
+  if (length(variables_float) > 1) {
+    df_transformado[,variables_float] <- apply(X = df_transformado %>% 
+                                                        dplyr::select_at(variables_float),MARGIN = 2,FUN = as.integer)
+  }else{
+    df_transformado[,variables_float] <- as.numeric(df_transformado[,variables_float])
+  }
+}
+
+# si hay variables date, puedo aplicar transformaciones date
+if (length(variables_date) > 0) {
+  for (variable_for in variables_date) {
+    df_transformado[,variable_for] <- as.Date.character(x = df_transformado[,variable_for],
+                                                        tryFormats = "%Y%m%d")
+  }
+}
+
+
+```
