@@ -108,7 +108,7 @@ source(paste0(funserver,"/my_sqlQuery_encoding.R"))
 Redefinición de nombres de columnas:
 
 - Pregunta_1: ¿Cuál es tu sexo? 
-- Pregunta_2: ¿Estás embarazada?] 
+- Pregunta_2: ¿Estás embarazada?
 - Pregunta_3: ¿Cuál es la fecha de tu última menstruación?
 - Pregunta_4: ¿Te realizaste análisis en el último año?
 - Pregunta_5: ¿Los resultados fueron normales? 
@@ -325,6 +325,9 @@ toc()
 cat("Número de filas: ",nrow(df_original))
 cat("\nNúmero de columnas: ",ncol(df_original))
 
+df_original$APELLIDO_NOMBRE <- toupper(trimws(x = str_replace_all(string = df_original$APELLIDO_NOMBRE,
+                                               pattern = ",",
+                                               replacement = "")))
 
 # Reemplazamos todas las cadenas vacias por NA
 df_original[df_original == ""] <- NA
@@ -468,13 +471,37 @@ plot_unique_val <- ggplotly(p = plot_unique_val,tooltip = "",height = 20 * n_dis
 
 plot_unique_val
 
+# ID SOLICITUD REPETIDOS (LAS REPETICIONES SON CON EL MISMO DNI)
 df_original %>% 
+  dplyr::filter(!is.na(DNUM_ID_SOLICITUD)) %>%
+  dplyr::group_by(DNUM_ID_SOLICITUD) %>% 
+  dplyr::summarise(Cant_Filas = n(),
+                   Cant_DNI = n_distinct(DNUM_DOCUMENTO)) %>%
+  dplyr::mutate(Multiples_Filas = ifelse(test = Cant_Filas > 1,
+                                           yes = "SI",
+                                           no = "NO")) %>%
+  dplyr::count(Multiples_Filas) %>%
+  dplyr::mutate(Porc = n/nrow(df_original[!is.na(df_original$DNUM_ID_SOLICITUD),])*100) %>% 
+  ggplot(aes(x="", y=Porc, fill=Multiples_Filas)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar(theta = "y", start=0) +
+  theme_void() + 
+  theme(legend.text = element_text(size = 10)
+        ,legend.title = element_text(size = 10)) +
+  geom_text(aes(x = 1, label = paste0(round(Porc,1),"%\n ",n,"/",n_distinct(df_original[!is.na(df_original$DNUM_ID_SOLICITUD),]$DNUM_ID_SOLICITUD))), color = "black", size=4,position = position_stack(vjust = 0.5)) +
+  labs(fill = "ID Solicitud Repetido",title = "Porcentaje de ID Solicitud repetidos con distintos Socios") +
+  scale_fill_manual(values = c("NO" = "green3","SI" = "red"))
+
+# DNI CON MAS DE UN NOMBRE
+df_original %>% 
+  dplyr::filter(!is.na(DNUM_DOCUMENTO)) %>%
   dplyr::group_by(DNUM_DOCUMENTO) %>% 
   dplyr::summarise(Cant_Nombres = n_distinct(APELLIDO_NOMBRE)) %>% 
-  dplyr::filter(!is.na(DNUM_DOCUMENTO)) %>% view()
-  dplyr::mutate(Multiples_Nombres = ifelse(test = Cant_Nombres > 1,
-                                           yes = "SI",
-                                           no = "NO")) %>% 
+  dplyr::mutate(Multiples_Nombres = ifelse(test = is.na(DNUM_DOCUMENTO),
+                                           yes = "DNI en NA",
+                                           no = ifelse(test = Cant_Nombres > 1,
+                                                       yes = "SI",
+                                                       no = "NO"))) %>% 
   dplyr::count(Multiples_Nombres) %>% 
   dplyr::mutate(Porc = n/n_distinct(df_original$DNUM_DOCUMENTO)*100) %>% 
   ggplot(aes(x="", y=Porc, fill=Multiples_Nombres)) +
@@ -486,6 +513,32 @@ df_original %>%
   geom_text(aes(x = 1, label = paste0(round(Porc,1),"%\n ",n,"/",n_distinct(df_original$DNUM_DOCUMENTO))), color = "black", size=4,position = position_stack(vjust = 0.5)) +
   labs(fill = "DNI con Multiples Nombres",title = "Porcentaje de DNIs que apuntan a más de un nombre distinto") +
   scale_fill_manual(values = c("NO" = "green3","SI" = "red"))
+
+# DDJJ COMPLETA vs INCOMPLETA
+df_original %>% 
+  dplyr::filter(!is.na(DNUM_DOCUMENTO)) %>%
+  dplyr::group_by(DDJJ_COMPLETA) %>% 
+  dplyr::summarise(Cant_Socios = n_distinct(DNUM_DOCUMENTO)) %>%
+  dplyr::mutate(Porc = Cant_Socios/n_distinct(df_original$DNUM_DOCUMENTO)*100,
+                DDJJ_COMPLETA = ifelse(test = is.na(DDJJ_COMPLETA),
+                                       yes = "NO",
+                                       no = ifelse(test = DDJJ_COMPLETA == "true",
+                                                   yes = "SI",
+                                                   no = "NO"))) %>% 
+  ggplot(aes(x="", y=Porc, fill=DDJJ_COMPLETA)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar(theta = "y", start=0) +
+  theme_void() + 
+  theme(legend.text = element_text(size = 10)
+        ,legend.title = element_text(size = 10)) +
+  geom_text(aes(x = 1, 
+                label = paste0(round(Porc,1),"%\n ",Cant_Socios,"/",n_distinct(df_original[!is.na(df_original$DNUM_DOCUMENTO),]$DNUM_DOCUMENTO))), 
+                color = "black", 
+                size=4,
+                position = position_stack(vjust = 0.5)) +
+  labs(fill = "DDJJ Completa",title = "Porcentaje de Socios según DDJJ Completa",subtitle = "Sólo socios con DNI completo") +
+  scale_fill_manual(values = c("SI" = "green3","NO" = "red"))
+
 # plot_tipo_variable <- ggplot(variables_descriptivo, aes(x = Tipo_Variable, y = Variable, color = Tipo_Variable)) +
 #   geom_point(size = 4, width = 0.2, height = 0.2) +  # Usamos jitter para evitar solapamiento
 #   labs(
@@ -520,10 +573,11 @@ ggplot(df_original %>% filter(!is.na(PREGUNTA_1)), aes(x = EDAD, fill = PREGUNTA
   coord_cartesian(xlim = c(0, 90))  # Solo ajusta la visualización del eje X
 ```
 
-## Variables Categóricas
+## Sobre Preexistencias
 
 ```{r}
-
+df_original_DNI_sin_NA <- df_original %>% 
+                              dplyr::filter(!is.na(DNUM_DOCUMENTO))
 cant_dni_variable <- function(df,var_select){
   resumen_agrup <- df %>% 
                       dplyr::group_by_at(var_select) %>% 
@@ -539,42 +593,139 @@ vars_categ <- variables_descriptivo %>%
                       dplyr::pull(Variable) %>% 
                       unique()
 
-vars_categ <- "PREGUNTA_9"
+df_original_DNI_sin_NA$Preexistencias_Si_No <- ifelse(test = is.na(df_original_DNI_sin_NA$PREGUNTA_9),
+                                           yes = "INCOMPLETO",
+                                           no = ifelse(test = df_original_DNI_sin_NA$PREGUNTA_9 == "Ninguna de las anteriores",
+                                                       yes = "NO",
+                                                       no = "SI"))
 
-l <- htmltools::tagList()
-i <- 1
 
-for (var_for in vars_categ) {
-  plot_generico <- cant_dni_variable(df = df_original,var_select = var_for) %>% 
-                              ggplot(aes_string(x = var_for,y = "Porc")) +
-                              geom_bar(stat = "identity") +
-                              geom_text(aes(label = paste0(round(Porc,1),"%\n(",Cant_Socios,"/",n_distinct(df_original$DNUM_DOCUMENTO),")")), 
-                                        position = position_stack(vjust = 0.5), 
-                                        color = "black",
-                                        size = 3.5) +
-                              labs(x = NULL,y = NULL,title = paste0("Cantidad de Socios según ",var_for)) +
-                              theme_minimal() +
-                              theme(legend.position = "none",
-                                    panel.grid.major = element_blank(),
-                                      panel.grid.minor = element_blank()) +
-                              scale_y_continuous(labels = scales::percent_format(scale = 1)) +
-                              coord_flip()
+
+plot_total <- cant_dni_variable(df = df_original_DNI_sin_NA,var_select = "Preexistencias_Si_No") %>%
+                              ggplot(aes(x="", y=Porc, fill=Preexistencias_Si_No)) +
+                              geom_bar(stat="identity", width=1, color="white") +
+                              coord_polar(theta = "y", start=0) +
+                              theme_void() + 
+                              theme(legend.text = element_text(size = 10)
+                                    ,legend.title = element_text(size = 10)) +
+                              geom_text(aes(x = 1, 
+                                            label = paste0(round(Porc,1),"%\n ",Cant_Socios,"/",n_distinct(df_original_DNI_sin_NA$DNUM_DOCUMENTO))), 
+                                        color = "black", 
+                                        size=4,
+                                        position = position_stack(vjust = 0.5)) +
+                              labs(fill = "Preexistencias",title = "Porcentaje de Socios s/Preexistencias") +
+                              scale_fill_manual(values = c("NO" = "green3","SI" = "red","INCOMPLETO" = "yellow3"))
   
-  plot_generico <- ggplotly(p = plot_generico,tooltip = "")
-  
-  l[[i]] <- plot_generico
-  
-  i <- i + 1
 
-} 
+df_original_con_preexistencias <- df_original_DNI_sin_NA %>% 
+                                      dplyr::filter(!is.na(DNUM_DOCUMENTO),
+                                                    Preexistencias_Si_No == "SI")
 
-l
+# plot_total <- ggplotly(p = plot_total,tooltip = "")
+plot_total
+
+plot_preexist <- cant_dni_variable(df = df_original_con_preexistencias,var_select = "PREGUNTA_9") %>%
+                            dplyr::mutate(PREGUNTA_9 = factor(PREGUNTA_9,levels = unique(PREGUNTA_9))) %>% 
+                            ggplot(aes_string(x = "PREGUNTA_9",y = "Porc")) +
+                            geom_bar(stat = "identity",aes(fill = "skyblue")) +
+                            geom_text(aes(label = paste0(round(Porc,1),"%\n(",Cant_Socios,"/",n_distinct(df_original_con_preexistencias$DNUM_DOCUMENTO),")")),
+                                      position = position_stack(vjust = 0.5),
+                                      color = "black",
+                                      size = 3.5) +
+                            labs(x = NULL,y = NULL,title = paste0("Cantidad de Socios según Tipo de Preexistencia")) +
+                            theme_minimal() +
+                            theme(legend.position = "none",
+                                  panel.grid.major = element_blank(),
+                                    panel.grid.minor = element_blank()) +
+                            scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+                            coord_flip()
+
+plot_preexist <- ggplotly(p = plot_preexist,tooltip = "",height = 20 * n_distinct(df_original_con_preexistencias$PREGUNTA_9),width = 1400)
+
+plot_preexist
+
+
 ```
 
 
+## Sobre Edad
 
+```{r}
 
+# boxplot(df_original$EDAD)
 
+# Crear el boxplot con ggplot2 y añadir información adicional
+boxplot_edad <- ggplot(df_original_con_preexistencias, aes(x = "",y = EDAD)) +
+  geom_boxplot(outlier.shape = NA, fill = "lightblue", color = "black") + # Boxplot sin outliers
+  stat_summary(fun = "mean", geom = "point", shape = 18, size = 3, color = "red") + # Media
+  stat_summary(fun = "median", geom = "point", shape = 17, size = 3, color = "green3") + # Mediana
+  stat_summary(fun = "mean", geom = "text", aes(label = paste("Media: ", round(..y.., 2))), 
+               color = "red", vjust = -1.5, size = 3) + # Añadir valor de la media
+  stat_summary(fun = "median", geom = "text", aes(label = paste("Mediana: ", round(..y.., 2))), 
+               color = "green3", vjust = 1.5, size = 3) + # Añadir valor de la mediana
+  stat_summary(fun.data = function(x) {
+    return(data.frame(y = quantile(x, 0.25), label = paste("Q1:", round(quantile(x, 0.25), 2))))
+  }, geom = "text", color = "blue", vjust = -0.5) + # Q1
+  stat_summary(fun.data = function(x) {
+    return(data.frame(y = quantile(x, 0.75), label = paste("Q3:", round(quantile(x, 0.75), 2))))
+  }, geom = "text", color = "blue", vjust = 1.5) + # Q3
+  stat_summary(fun.data = function(x) {
+    return(data.frame(y = IQR(x), label = paste("IQR:", round(IQR(x), 2))))
+  }, geom = "text", color = "purple", vjust = 2) + # IQR
+  theme_minimal() +
+  # facet_wrap(~PREGUNTA_9,ncol = 2) +
+  ggtitle("Boxplot Edad de Socios con Preexistencias") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = NULL)
+
+boxplot_edad <- ggplotly(p = boxplot_edad,tooltip = "")
+
+boxplot_edad
+
+diccionario_titular <- read_excel(path = "diccionarios_data.xlsx",sheet = "Titular")
+l <- htmltools::tagList()
+i <- 1
+preguntas_si_no <- c("PREGUNTA_2",
+                     "PREGUNTA_4",
+                     "PREGUNTA_5",
+                     "PREGUNTA_7",
+                     "PREGUNTA_15",
+                     "PREGUNTA_28",
+                     "PREGUNTA_32",
+                     "PREGUNTA_38")
+for (var_for in preguntas_si_no) {
+  nombre_variable <- diccionario_titular[diccionario_titular$Variable == var_for,]$Descripción
+  
+  plot_generico <- cant_dni_variable(df = df_original_con_preexistencias[!is.na(df_original_con_preexistencias$DNUM_DOCUMENTO),],var_select = var_for) %>%
+                              dplyr::mutate_at(.vars = var_for,.funs = function(v){factor(ifelse(test = is.na(v),
+                                                                                          yes = "Incompleto",
+                                                                                          no = as.character(v)))}) %>% 
+                              ggplot(aes(x = "",y=Porc),aes_string(fill=var_for)) +
+                              # ggplot(aes(x="", y=Porc, fill=PREGUNTA_2)) +
+                              geom_bar(stat="identity", width=1, color="white") +
+                              coord_polar(theta = "y", start=0) +
+                              theme_void() + 
+                              theme(legend.text = element_text(size = 10)
+                                    ,legend.title = element_text(size = 10)) +
+                              geom_text(aes(x = 1, 
+                                            label = paste0(round(Porc,1),"%\n ",Cant_Socios,"/",n_distinct(df_original_con_preexistencias[!is.na(df_original_con_preexistencias$DNUM_DOCUMENTO),]$DNUM_DOCUMENTO))), 
+                                            color = "black", 
+                                            size=4,
+                                            position = position_stack(vjust = 0.5)) +
+                              labs(fill = nombre_variable,title = paste0("Porcentaje de Socios según ",nombre_variable),subtitle = "Socios con Preexistencias") +
+                              scale_fill_manual(values = c("Sí" = "green3","No" = "red","Incompleto" = "yellow3"))
+
+  # plot_generico <- ggplotly(p = plot_generico,tooltip = "")
+  print(plot_generico)
+  # l[[i]] <- plot_generico
+
+  # i <- i + 1
+
+}
+
+# l
+
+```
 
 
 
