@@ -1,0 +1,591 @@
+---
+title: "Score Socios con Preexistencias"
+output: 
+  html_document:
+     toc: yes
+     code_folding: hide
+     toc_float: yes
+     df_print: paged
+     theme: united
+     code_download: true
+     warning: FALSE
+date: "`r format(Sys.time(), '%d-%m-%Y')`"
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(
+        inputFile, encoding = encoding,
+        output_file = file.path(
+            dirname(inputFile), paste0('EDA_Score_socios_preex_',Sys.Date(),'.html')))
+    })
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+
+
+```{r,echo=FALSE}
+#Carga de Librerias y funciones
+
+library(odbc)
+library(DBI)
+library(tidyverse)  # para dplyr
+library(lubridate)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(openxlsx)
+library(readxl)
+library(tictoc)
+library(gridExtra)
+library(writexl)
+library(kableExtra)
+library(stringr)
+library(corrplot)
+library(solitude)
+library(isotree)
+library(dbscan)
+library(scales)
+library(rgl)
+library(tictoc)
+
+```
+
+```{r,echo=FALSE}
+# Función SQLQueryIn con maximo 30
+
+# Funcion para armar dinamicamente una consulta que viajara al
+# motor SQL en la cual se necesita traer datos asociados a un conjunto
+# de valores en formato "in (...)"
+
+# Parametros:
+# conn: conexion a SQL
+# values: vector con los valores a consultar
+# qry: consulta sql. En el lugar donde va la lista de valores reemplazar por 
+# el caracter "#"
+
+sqlQueryIn <- function(conn,values,qry){
+  f <- function(x, output) {
+    xx <- paste(x,collapse=",")
+    q <- gsub("#",xx,qry)
+    q <- str_replace_all(str_replace_all(q,"\n",""),"\\s+"," ")
+    output <- sqlQuery(conn,q)
+  }
+  
+  max <- 30
+  if (class(values)=="character"){n
+    values <- paste("'",values,"'",sep="")
+  }
+  x <- seq_along(values)
+  values.sp <- split(values, ceiling(x/max))
+  result <- lapply(values.sp, f)
+  result <- as.data.frame(do.call(rbind, result))
+}
+
+#Función para establecer la conexión a SQL Server
+conectar_sql <- function(dsn, database, uid, pwd, timeout = 10) {
+  con <- dbConnect(odbc::odbc(),
+                   dsn,
+                   database = database,
+                   uid = uid,
+                   pwd = pwd,
+                   timeout = timeout)
+  return(con)
+}
+
+# Levantamos la funcion con encoding
+funserver <- Sys.getenv("RFUN_PATH")
+source(paste0(funserver,"/sqlQueryIn.R"))
+source(paste0(funserver,"/my_sqlQuery_encoding.R"))
+
+```
+
+
+# Lectura de datos
+
+Redefinición de nombres de columnas:
+
+- Pregunta_1: ¿Cuál es tu sexo? 
+- Pregunta_2: ¿Estás embarazada?] 
+- Pregunta_3: ¿Cuál es la fecha de tu última menstruación?
+- Pregunta_4: ¿Te realizaste análisis en el último año?
+- Pregunta_5: ¿Los resultados fueron normales? 
+- Pregunta_6: ¿Cuál fue el diagnóstico? 
+- Pregunta_7: ¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?
+- Pregunta_8: ¿Qué patología de visión presenta?
+- Pregunta_9: ¿Tenés o tuviste alguna de las siguientes patologías?
+- Pregunta_10: ¿Qué patología de audición presenta?
+- Pregunta_11: ¿Qué patología hereditaria presenta?
+- Pregunta_12: Alguna patologia que no este en el listado de visión
+- Pregunta_13: ¿Qué patología psiquiátrica presenta?
+- Pregunta_14: Graduación de miopía
+- Pregunta_15: ¿Te realizaron cirugías?
+- Pregunta_16: ¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?
+- Pregunta_17: ¿Cuál fue el año de la intervención del Sistema Nervioso?
+- Pregunta_18: ¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?
+- Pregunta_19: ¿Cuál fue el año de la intervención Abdominal?
+- Pregunta_20: ¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?
+- Pregunta_21: ¿Cuál fue el año de la intervención Sistema endocrino?
+- Pregunta_22: ¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_23: ¿Cuál fue el año de la intervención Cardiológica?
+- Pregunta_24: ¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_25: ¿Cuál fue el año de la intervención Ginecológica?
+- Pregunta_26: ¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_27: ¿Cuál fue el año de la intervención Traumatológica?
+- Pregunta_28: ¿Tiene protesis?
+- Pregunta_29: ¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?
+- Pregunta_30: ¿Cuál fue el año de la intervención Otras?
+- Pregunta_31: ¿Que cirugía del listado?
+- Pregunta_32: ¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?
+- Pregunta_32_Fecha_Baja: Fecha baja certificado discapacidad
+- Pregunta_32_Diagnostico: Diagnóstico discapacidad
+- Pregunta_32_Fecha_Alta: Fecha alta certificado discapacidad 
+- Pregunta_33: ¿Te encontrás realizando alguno de los siguientes tratamientos?
+- Pregunta_34: ¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?
+- Pregunta_35: ¿Que tratamiento tienes pensado hacer?
+- Pregunta_35_DDJJ: DDJJ_Completa
+- Pregunta_36: ¿Tienes alguna patología?
+- Pregunta_37: ¿Padecés alguna/s patología/s además de las mencionadas anteriormente?
+- Pregunta_38: ¿Tuviste internaciones?
+- Pregunta_39: Cuantas internaciones tuvo
+- Pregunta_40: Motivo de la internación 
+- Pregunta_41: ¿Cuál fue el año de la internación? 
+
+```{r}
+
+query_text1 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[DCOD_PLAN_ALTA_f1]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[Composición Familiar] as Composicion_Familiar
+      ,[DNUM_CUIT_EMPRESA]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_TITULAR_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+query_text2 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_GF_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+
+# Levantamos el de titulares
+tic()
+#df_original <- my_sqlQuery_encoding(2,query_text1)
+#save(df_original, file = "J:/67_Preexistencia/df_original.RData")
+load("df_original.RData")
+toc()
+
+# Levantamos el de grupo familiar
+tic()
+# data_gf <- my_sqlQuery_encoding(2,query_text2)
+# save(data_gf, file = "data_gf.RData")
+load("data_gf.RData")
+toc()
+
+
+
+```
+
+# Tabla: Titulares
+## Mapeo de variables
+
+```{r}
+# si contamos con un diccionario de datos, la parte de definir que tipo de datos es cada variable, se puede omitir o simplemente al transformar, contejar que la data quede OK
+cat("Número de filas: ",nrow(df_original))
+cat("\nNúmero de columnas: ",ncol(df_original))
+
+
+# Reemplazamos todas las cadenas vacias por NA
+df_original[df_original == ""] <- NA
+
+
+variables_descriptivo <- colSums(is.na(df_original)) %>% 
+                      as.data.frame()
+
+variables_descriptivo$Variable <- rownames(variables_descriptivo)
+rownames(variables_descriptivo) <- NULL
+variables_descriptivo$Cant_Filas_NA <- variables_descriptivo[,1]
+variables_descriptivo <- variables_descriptivo[,-1]
+
+variables_descriptivo$Tipo_Variable <- NA
+variables_descriptivo$Cant_Valores_Unicos <- NA
+variables_descriptivo$Cant_Filas_Cadena_Nula <- NA
+
+# recorro todas las columnas del dataframe original
+for (i in 1:ncol(df_original)) {
+  
+  # quito las filas que tienen NA en la columna que estamos chequeando
+  data_sin_na <- df_original[!is.na(df_original[,variables_descriptivo$Variable[i]]),]
+  
+  # defino el tipo de dato segun la funcion 'class'
+  # despues especifico mas en el caso de las numericas
+  variables_descriptivo$Tipo_Variable[i] <- class(data_sin_na[,variables_descriptivo$Variable[i]])
+  
+  # contabilizo el numero de valores distintos (sin NA)
+  variables_descriptivo$Cant_Valores_Unicos[i] <- n_distinct(data_sin_na[,variables_descriptivo$Variable[i]])
+  
+  # cuando convierto a numerica, cuento la cantidad de veces que queda como NA
+  # si la cantidad es minima, entonces la variable es numerica
+  # si no, era character y la dejo asi
+  variable_es_numerica <- sum(is.na(as.numeric(data_sin_na[,variables_descriptivo$Variable[i]])))/nrow(data_sin_na) < 0.001
+  
+  # en caso de ser numerica, actualizo el tipo de dato
+  if (variable_es_numerica) {
+    variables_descriptivo[i,]$Tipo_Variable <- "numeric"
+  }
+  
+  # cuando es numerica, determinamos si es entera o float (discreta o continua)
+  # para luego especificar mejor los graficos a realizar
+  if (variables_descriptivo[i,]$Tipo_Variable == "numeric") {
+    
+    # convierto la columna a integer
+    convierto_entero <- as.integer(data_sin_na[,variables_descriptivo$Variable[i]])
+    
+    # convierto la columna a numeric
+    original_numeric <- as.numeric(data_sin_na[,variables_descriptivo$Variable[i]])
+    
+    # cuento la cantidad de casos donde quedan igual, lo que significa que truncar la parte decimal
+    # no afecta
+    cant_casos <- sum(convierto_entero == original_numeric)
+    
+    # si a todos les pasa eso, es integer
+    # si alguno no cumple, tiene que ser float
+    variable_es_integer <- cant_casos == nrow(data_sin_na)
+    
+    if (variable_es_integer) {
+      variables_descriptivo[i,]$Tipo_Variable <- "integer"
+    }else{
+      variables_descriptivo[i,]$Tipo_Variable <- "float"
+    }
+  }
+  rm(convierto_date,convierto_date_error)
+  # verifico si alguna de las integer se puede convertir en fecha
+  if (variables_descriptivo[i,]$Tipo_Variable == "integer") {
+    # convierto la columna a date
+    convierto_date <- tryCatch(expr = {as.Date.character(x = data_sin_na[,variables_descriptivo$Variable[i]],tryFormats = "%Y%m%d")},
+             error = function(cond){
+               return(TRUE)})
+    
+    if (!isTRUE(convierto_date)) {
+      if (sum(is.na(convierto_date)) < 0.001){
+        variables_descriptivo[i,]$Tipo_Variable <- "date"
+      }
+    }
+  }
+  
+  # si la variable era character, cuento la cantidad de veces en que vino como ""
+  if (class(df_original[,variables_descriptivo$Variable[i]]) == "character") {
+    variables_descriptivo$Cant_Filas_Cadena_Nula[i] <- sum(data_sin_na[,variables_descriptivo$Variable[i]] == "")   
+  }else{
+    variables_descriptivo$Cant_Filas_Cadena_Nula[i] <- 0
+  }
+  
+  
+}
+
+
+variables_descriptivo$Es_ID <- ifelse(test = variables_descriptivo$Cant_Valores_Unicos == nrow(df_original),
+                                      yes = "SI",
+                                      no = "NO")
+
+variables_descriptivo$Es_Categorica <- ifelse(test = variables_descriptivo$Tipo_Variable %in% c("integer","character") & variables_descriptivo$Cant_Valores_Unicos < 20,
+                                              yes = "SI",
+                                              no = "NO")
+
+variables_descriptivo[variables_descriptivo$Cant_Valores_Unicos <= 2,]$Tipo_Variable <- "boolean"
+
+data_plot_NAs <- variables_descriptivo %>% 
+                          dplyr::filter(Cant_Filas_NA > 0) %>% 
+                          dplyr::arrange(Cant_Filas_NA) %>% 
+                          dplyr::mutate(Porcentaje = Cant_Filas_NA / nrow(df_original) * 100,
+                                        Variable = factor(Variable,levels = unique(Variable)))
+
+plot_NAs <- data_plot_NAs %>% 
+                  ggplot(aes(x = Variable,y = Porcentaje)) +
+                  theme_minimal() +
+                  coord_flip() +
+                  geom_bar(stat = "identity") +
+                  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Formatear y como porcentaje
+                  geom_text(aes(label = paste0(round(Porcentaje, 1), "% (",Cant_Filas_NA,"/",nrow(df_original),")")), 
+                            position = position_stack(vjust = 0.5), 
+                            color = "white",
+                            size = 2.5) +
+                  labs(title = "Porcentaje de filas en NA por variable",x = NULL, y = NULL)
+
+ plot_NAs <- ggplotly(p = plot_NAs,tooltip = "",height = 20 * n_distinct(variables_descriptivo$Variable),width = 1400)
+
+plot_NAs
+
+data_plot_unique_val <- variables_descriptivo %>%  
+                          dplyr::arrange(Cant_Valores_Unicos) %>% 
+                          dplyr::mutate(Porcentaje = Cant_Valores_Unicos / nrow(df_original) * 100,
+                                        Variable = factor(Variable,levels = unique(Variable)))
+
+plot_unique_val <- data_plot_unique_val %>% 
+                  ggplot(aes(x = Variable,y = Porcentaje)) +
+                  theme_minimal() +
+                  coord_flip() +
+                  geom_bar(stat = "identity") +
+                  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Formatear y como porcentaje
+                  geom_text(aes(label = paste0(round(Porcentaje, 1), "% (",Cant_Valores_Unicos,"/",nrow(df_original),")")), 
+                            position = position_stack(vjust = 0.5), 
+                            color = "white",
+                            size = 2.5) +
+                  labs(title = "Porcentaje de Valores únicos por variable",x = NULL, y = NULL)
+
+plot_unique_val <- ggplotly(p = plot_unique_val,tooltip = "",height = 20 * n_distinct(variables_descriptivo$Variable),width = 1400)
+
+plot_unique_val
+
+df_original %>% 
+  dplyr::group_by(DNUM_DOCUMENTO) %>% 
+  dplyr::summarise(Cant_Nombres = n_distinct(APELLIDO_NOMBRE)) %>% 
+  dplyr::filter(!is.na(DNUM_DOCUMENTO)) %>% view()
+  dplyr::mutate(Multiples_Nombres = ifelse(test = Cant_Nombres > 1,
+                                           yes = "SI",
+                                           no = "NO")) %>% 
+  dplyr::count(Multiples_Nombres) %>% 
+  dplyr::mutate(Porc = n/n_distinct(df_original$DNUM_DOCUMENTO)*100) %>% 
+  ggplot(aes(x="", y=Porc, fill=Multiples_Nombres)) +
+  geom_bar(stat="identity", width=1, color="white") +
+  coord_polar(theta = "y", start=0) +
+  theme_void() + 
+  theme(legend.text = element_text(size = 10)
+        ,legend.title = element_text(size = 10)) +
+  geom_text(aes(x = 1, label = paste0(round(Porc,1),"%\n ",n,"/",n_distinct(df_original$DNUM_DOCUMENTO))), color = "black", size=4,position = position_stack(vjust = 0.5)) +
+  labs(fill = "DNI con Multiples Nombres",title = "Porcentaje de DNIs que apuntan a más de un nombre distinto") +
+  scale_fill_manual(values = c("NO" = "green3","SI" = "red"))
+# plot_tipo_variable <- ggplot(variables_descriptivo, aes(x = Tipo_Variable, y = Variable, color = Tipo_Variable)) +
+#   geom_point(size = 4, width = 0.2, height = 0.2) +  # Usamos jitter para evitar solapamiento
+#   labs(
+#     title = "Variables por Tipo de Dato",
+#     x = "Tipo de Dato",
+#     y = "Nombre de la Variable"
+#   ) +
+#   theme_minimal() +
+#   theme(axis.text.y = element_text(size = 10))  # Ajustar tamaño de los nombres de las variables
+# 
+# plot_tipo_variable <- ggplotly(p = plot_tipo_variable,tooltip = "",height = 20 * n_distinct(variables_descriptivo$Variable),width = 1000)
+# 
+# plot_tipo_variable
+
+```
+
+
+## Género por Edad sin nulos
+
+```{r}
+# Crear el gráfico
+ggplot(df_original %>% filter(!is.na(PREGUNTA_1)), aes(x = EDAD, fill = PREGUNTA_1)) +
+  geom_histogram(binwidth = 5, position = "stack", color = "black") +  # Barras apiladas
+  scale_fill_manual(values = c("Femenino" = "#E69F00", "Masculino" = "#0072B2")) +  # Colores personalizados
+  scale_x_continuous(breaks = seq(0, 90, by = 5)) +  # Mostrar cada 5 años en el eje X
+  labs(title = "Distribución de Edad por Género", x = "Edad", y = "Cantidad", fill = "Género") +
+  theme_minimal() +  # Estilo limpio
+  theme(
+    plot.title = element_text(hjust = 0.5, face = "bold"),
+    legend.position = "top"
+  ) +
+  coord_cartesian(xlim = c(0, 90))  # Solo ajusta la visualización del eje X
+```
+
+## Variables Categóricas
+
+```{r}
+
+cant_dni_variable <- function(df,var_select){
+  resumen_agrup <- df %>% 
+                      dplyr::group_by_at(var_select) %>% 
+                      dplyr::summarise(Cant_Socios = n_distinct(DNUM_DOCUMENTO)) %>% 
+                      dplyr::mutate(Porc = Cant_Socios / n_distinct(df$DNUM_DOCUMENTO) * 100) %>% 
+                      dplyr::arrange(Cant_Socios) %>% 
+                      dplyr::mutate_at(.vars = var_select,.funs = factor)
+  return(resumen_agrup)
+}
+
+vars_categ <- variables_descriptivo %>% 
+                      dplyr::filter(Es_Categorica == "SI") %>% 
+                      dplyr::pull(Variable) %>% 
+                      unique()
+
+vars_categ <- "PREGUNTA_9"
+
+l <- htmltools::tagList()
+i <- 1
+
+for (var_for in vars_categ) {
+  plot_generico <- cant_dni_variable(df = df_original,var_select = var_for) %>% 
+                              ggplot(aes_string(x = var_for,y = "Porc")) +
+                              geom_bar(stat = "identity") +
+                              geom_text(aes(label = paste0(round(Porc,1),"%\n(",Cant_Socios,"/",n_distinct(df_original$DNUM_DOCUMENTO),")")), 
+                                        position = position_stack(vjust = 0.5), 
+                                        color = "black",
+                                        size = 3.5) +
+                              labs(x = NULL,y = NULL,title = paste0("Cantidad de Socios según ",var_for)) +
+                              theme_minimal() +
+                              theme(legend.position = "none",
+                                    panel.grid.major = element_blank(),
+                                      panel.grid.minor = element_blank()) +
+                              scale_y_continuous(labels = scales::percent_format(scale = 1)) +
+                              coord_flip()
+  
+  plot_generico <- ggplotly(p = plot_generico,tooltip = "")
+  
+  l[[i]] <- plot_generico
+  
+  i <- i + 1
+
+} 
+
+l
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
