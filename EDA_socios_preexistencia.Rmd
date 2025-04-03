@@ -78,7 +78,7 @@ source(paste0(funserver,"/my_sqlQuery_encoding.R"))
 Redefinición de nombres de columnas:
 
 - Pregunta_1: ¿Cuál es tu sexo? 
-- Pregunta_2: ¿Estás embarazada?] 
+- Pregunta_2: ¿Estás embarazada?
 - Pregunta_3: ¿Cuál es la fecha de tu última menstruación?
 - Pregunta_4: ¿Te realizaste análisis en el último año?
 - Pregunta_5: ¿Los resultados fueron normales? 
@@ -345,7 +345,59 @@ cat(paste0("Cantidad de DNI con más de una Solicitud asociada: ",
            df_original %>% group_by(DNUM_DOCUMENTO) %>% summarise(Cantidad_Solicitudes = n_distinct(DNUM_ID_SOLICITUD)) %>% filter(Cantidad_Solicitudes >1) %>% nrow(),
            sep=""))
 
+
+```
+
+
+
+```{r}
+# Visualizacion de numero de nulos, podria ser en una tabla y los sacamos
+
+# Hay nulos en DOCUMENTO
+NULOSDNI = df_original[is.na(df_original$DNUM_DOCUMENTO),] %>% nrow()
+# Hay nulos en ID_SOLICITUD
+NULOSID = df_original[is.na(df_original$DNUM_ID_SOLICITUD),] %>% nrow()
+
+
+
+# Crear dataframe con los valores solicitados
+df_nulos <- data.frame(
+  Detalle = c("Variable DNI", "Variable ID Solicitud"),
+  Filas = format(rep(nrow(df_original), 2), big.mark = "."),  # Separador de miles
+  Nulos = format(c(NULOSDNI, NULOSID), big.mark = "."),  # Separador de miles
+  Porcentaje_Nulos = paste0(round(c(NULOSDNI, NULOSID) / nrow(df_original) * 100, 2), "%") # Formato porcentaje
+)
+
+# Crear tabla en Markdown con kable
+kable(df_nulos, format = "markdown", align = c("l", "r", "r", "r"), col.names = c("Detalle", "Filas", "Nulos", "% Nulos"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+# Analisis de la base 
 df_original %>% group_by(DNUM_DOCUMENTO) %>% summarise(Cantidad_Solicitudes = n_distinct(DNUM_ID_SOLICITUD)) %>% filter(Cantidad_Solicitudes >1) %>% View()
+# Vemos cuales son los que estan duplicados por DNI
+
+
+
 
 table(df_original$DDES_TIPO_SOLICITUD, df_original$VALIDAR)
 
@@ -353,16 +405,24 @@ df_original %>% filter(DDES_TIPO_SOLICITUD=="Beneficiario") %>% View()
 
 
 df_original %>% filter(VALIDAR=="NO", DDES_TIPO_SOLICITUD != "Beneficiario") %>% View()
+df_original %>%
+  filter(VALIDAR == "NO", DDES_TIPO_SOLICITUD != "Beneficiario") %>%
+  select(30:67) %>%
+  View()
+
+df_original %>%
+  filter(VALIDAR == "NO", DDES_TIPO_SOLICITUD != "Beneficiario") %>%
+  select(1:29) %>%
+  View()
+
 
 
 df_original %>% filter(VALIDAR=="SI", DDES_TIPO_SOLICITUD != "Beneficiario") %>% View()
 
 
 
+
 ```
-
-
-
 
 
 
