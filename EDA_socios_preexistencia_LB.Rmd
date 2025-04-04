@@ -282,7 +282,7 @@ toc()
 tic()
 #data_gf <- my_sqlQuery_encoding(2,query_text2)
 #save(data_gf, file = "J:/67_Preexistencia/data_gf.RData")
-load("data_gf.RData")
+# load("data_gf.RData")
 toc()
 
 
@@ -290,7 +290,7 @@ toc()
 # Reemplazamos todas las cadenas vacias por NA en Titulares
 df_original[df_original == ""] <- NA
 # Reemplazamos todas las cadenas vacias por NA en Grupo Familiar
-data_gf[data_gf == ""] <- NA
+# data_gf[data_gf == ""] <- NA
 
 ```
 
@@ -632,6 +632,7 @@ query_consumos_socios_preexistencias <- paste0("SELECT CO.DID_SOCIO
 	  ,ME.DCOD_MEDICAMENTO
 	  ,ME.DDES_MEDICAMENTO
 	  ,MIN(F.DNUM_FECHA) AS 'FECHA_PRIMER_CONSUMO'
+	  ,MAX(F.DNUM_FECHA) AS 'FECHA_ULTIMO_CONSUMO'
     ,SUM([NUM_CANTIDAD]) AS 'FRECUENCIA'
     ,SUM([NUM_IMPORTE_TOTAL]) AS 'IMPORTE_TOTAL'
   FROM [DWDATAMART].[dbo].[vDWCONSUMOS] CO
@@ -672,6 +673,15 @@ toc()
 toc()
 
 ```
+## Visualizamos Consumos
+
+```{r}
+
+consumos_socios_preexistencias %>% 
+  dplyr::left_join(y = did_socio_vigente %>% dplyr::distinct(DID_SOCIO,FEC_ALTA)) %>% 
+  dplyr::mutate(Fecha_Primer_Consumo_Previo_Alta = FECHA_PRIMER_CONSUMO < FEC_ALTA) %>% 
+  dplyr::filter(Fecha_Primer_Consumo_Previo_Alta)
 
 
+```
 
