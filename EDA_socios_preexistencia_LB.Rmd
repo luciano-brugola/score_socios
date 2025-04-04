@@ -1,0 +1,677 @@
+---
+title: "Score Socios con Preexistencias"
+output: 
+  html_document:
+     toc: yes
+     code_folding: hide
+     toc_float: yes
+     df_print: paged
+     theme: united
+     code_download: true
+     warning: FALSE
+date: "`r format(Sys.time(), '%d-%m-%Y')`"
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(
+        inputFile, encoding = encoding,
+        output_file = file.path(
+            dirname(inputFile), paste0('EDA_Score_socios_preex_',Sys.Date(),'.html')))
+    })
+
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+
+
+```{r,echo=FALSE}
+#Carga de Librerias y funciones
+
+library(odbc)
+library(RODBC)
+library(DBI)
+library(tidyverse)  # para dplyr
+library(lubridate)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(openxlsx)
+library(readxl)
+library(tictoc)
+library(gridExtra)
+library(writexl)
+library(kableExtra)
+library(stringr)
+library(corrplot)
+library(solitude)
+library(isotree)
+library(dbscan)
+library(scales)
+library(rgl)
+library(tictoc)
+
+```
+
+```{r,echo=FALSE}
+
+#Funcion para establecer la conexión a SQL Server
+conectar_sql <- function(dsn, database, uid, pwd, timeout = 10) {
+  con <- dbConnect(odbc::odbc(),
+                   dsn,
+                   database = database,
+                   uid = uid,
+                   pwd = pwd,
+                   timeout = timeout)
+  return(con)}
+
+# Levantamos la funcion con encoding
+funserver <- Sys.getenv("RFUN_PATH")
+source(paste0(funserver,"/sqlQueryIn.R"))
+source(paste0(funserver,"/my_sqlQuery_encoding.R"))
+source(paste0(funserver,"/my_sqlQuery.R"))
+
+```
+
+
+# Lectura de datos
+
+Redefinición de nombres de columnas:
+
+- Pregunta_1: ¿Cuál es tu sexo? 
+- Pregunta_2: ¿Estás embarazada?
+- Pregunta_3: ¿Cuál es la fecha de tu última menstruación?
+- Pregunta_4: ¿Te realizaste análisis en el último año?
+- Pregunta_5: ¿Los resultados fueron normales? 
+- Pregunta_6: ¿Cuál fue el diagnóstico? 
+- Pregunta_7: ¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?
+- Pregunta_8: ¿Qué patología de visión presenta?
+- Pregunta_9: ¿Tenés o tuviste alguna de las siguientes patologías?
+- Pregunta_10: ¿Qué patología de audición presenta?
+- Pregunta_11: ¿Qué patología hereditaria presenta?
+- Pregunta_12: Alguna patologia que no este en el listado de visión
+- Pregunta_13: ¿Qué patología psiquiátrica presenta?
+- Pregunta_14: Graduación de miopía
+- Pregunta_15: ¿Te realizaron cirugías?
+- Pregunta_16: ¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?
+- Pregunta_17: ¿Cuál fue el año de la intervención del Sistema Nervioso?
+- Pregunta_18: ¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?
+- Pregunta_19: ¿Cuál fue el año de la intervención Abdominal?
+- Pregunta_20: ¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?
+- Pregunta_21: ¿Cuál fue el año de la intervención Sistema endocrino?
+- Pregunta_22: ¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_23: ¿Cuál fue el año de la intervención Cardiológica?
+- Pregunta_24: ¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_25: ¿Cuál fue el año de la intervención Ginecológica?
+- Pregunta_26: ¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_27: ¿Cuál fue el año de la intervención Traumatológica?
+- Pregunta_28: ¿Tiene protesis?
+- Pregunta_29: ¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?
+- Pregunta_30: ¿Cuál fue el año de la intervención Otras?
+- Pregunta_31: ¿Que cirugía del listado?
+- Pregunta_32: ¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?
+- Pregunta_32_Fecha_Baja: Fecha baja certificado discapacidad
+- Pregunta_32_Diagnostico: Diagnóstico discapacidad
+- Pregunta_32_Fecha_Alta: Fecha alta certificado discapacidad 
+- Pregunta_33: ¿Te encontrás realizando alguno de los siguientes tratamientos?
+- Pregunta_34: ¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?
+- Pregunta_35: ¿Que tratamiento tienes pensado hacer?
+- Pregunta_35_DDJJ: DDJJ_Completa
+- Pregunta_36: ¿Tienes alguna patología?
+- Pregunta_37: ¿Padecés alguna/s patología/s además de las mencionadas anteriormente?
+- Pregunta_38: ¿Tuviste internaciones?
+- Pregunta_39: Cuantas internaciones tuvo
+- Pregunta_40: Motivo de la internación 
+- Pregunta_41: ¿Cuál fue el año de la internación? 
+
+```{r}
+tic()
+query_text1 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[DCOD_PLAN_ALTA_f1]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[Composición Familiar] as Composicion_Familiar
+      ,[DNUM_CUIT_EMPRESA]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_TITULAR_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+query_text2 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_GF_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+
+# Levantamos el de titulares
+tic()
+#df_original <- my_sqlQuery_encoding(2,query_text1)
+#save(df_original, file = "J:/67_Preexistencia/df_original.RData")
+load("df_original.RData")
+toc()
+
+# Levantamos el de grupo familiar
+tic()
+#data_gf <- my_sqlQuery_encoding(2,query_text2)
+#save(data_gf, file = "J:/67_Preexistencia/data_gf.RData")
+load("data_gf.RData")
+toc()
+
+
+
+# Reemplazamos todas las cadenas vacias por NA en Titulares
+df_original[df_original == ""] <- NA
+# Reemplazamos todas las cadenas vacias por NA en Grupo Familiar
+data_gf[data_gf == ""] <- NA
+
+```
+
+# Titulares 
+## Cantidad de nulos DNUM_ID_SOLICITUD y DNUM_DOCUMENTO 
+
+```{r}
+
+
+# Graficamos los nulos de cada una de las variables
+variables_descriptivo <- colSums(is.na(df_original)) %>% as.data.frame()
+variables_descriptivo$Variable <- rownames(variables_descriptivo)
+rownames(variables_descriptivo) <- NULL
+variables_descriptivo$Cant_Filas_NA <- variables_descriptivo[,1]
+variables_descriptivo <- variables_descriptivo[,-1]
+
+data_plot_NAs <- variables_descriptivo %>% 
+                          dplyr::filter(Variable %in% c('DNUM_ID_SOLICITUD','DNUM_DOCUMENTO')) %>% 
+                          dplyr::arrange(Cant_Filas_NA) %>% 
+                          dplyr::mutate(Porcentaje = Cant_Filas_NA / nrow(df_original) * 100,
+                                        Variable = factor(Variable,levels = unique(Variable)))
+
+plot_NAs <- data_plot_NAs %>% 
+                  ggplot(aes(x = Variable,y = Porcentaje)) +
+                  theme_minimal() +
+                  coord_flip() +
+                  geom_bar(stat = "identity") +
+                  scale_y_continuous(labels = scales::percent_format(scale = 1)) +  # Formatear y como porcentaje
+                  geom_text(aes(label = paste0(round(Porcentaje, 1), "% (",Cant_Filas_NA,"/",nrow(df_original),")")), 
+                            position = position_stack(vjust = 0.5), 
+                            color = "white",
+                            size = 3.5) +
+                  labs(title = "Porcentaje de filas en NA por variable",x = NULL, y = NULL)
+
+ plot_NAs <- ggplotly(p = plot_NAs,tooltip = "",width = 1000)
+
+plot_NAs
+
+```
+
+
+
+## Integridad campo DNUM_ID_SOLICITUD versus DNUM_DOCUMENTO 
+
+```{r}
+
+# Vemos que haya un ID unico por cada DNUM_ID_SOLICITUD
+cat(paste0("Cantidad de Solicitudes con más de un DNI asociado: ",
+           df_original %>% group_by(DNUM_ID_SOLICITUD) %>% summarise(Cantidad_DNI = n_distinct(DNUM_DOCUMENTO)) %>% filter(Cantidad_DNI >1) %>% nrow(),
+           sep=""))
+
+# Vemos que haya una solicitud unica por cada DNI 
+cat(paste0("\nCantidad de DNI con más de una Solicitud asociada: ",
+           df_original %>% group_by(DNUM_DOCUMENTO) %>% summarise(Cantidad_Solicitudes = n_distinct(DNUM_ID_SOLICITUD)) %>% filter(Cantidad_Solicitudes >1) %>% nrow(),
+           sep=""))
+
+
+```
+
+
+
+```{r}
+# Visualizacion de numero de nulos, podria ser en una tabla y los sacamos
+
+# Hay nulos en DOCUMENTO
+NULOSDNI = df_original[is.na(df_original$DNUM_DOCUMENTO),] %>% nrow()
+# Hay nulos en ID_SOLICITUD
+NULOSID = df_original[is.na(df_original$DNUM_ID_SOLICITUD),] %>% nrow()
+
+
+
+# Crear dataframe con los valores solicitados
+df_nulos <- data.frame(
+  Detalle = c("Variable DNI", "Variable ID Solicitud"),
+  Filas = format(rep(nrow(df_original), 2), big.mark = "."),  # Separador de miles
+  Nulos = format(c(NULOSDNI, NULOSID), big.mark = "."),  # Separador de miles
+  Porcentaje_Nulos = paste0(round(c(NULOSDNI, NULOSID) / nrow(df_original) * 100, 2), "%") # Formato porcentaje
+)
+
+# Crear tabla en Markdown con kable
+kable(df_nulos, format = "markdown", align = c("l", "r", "r", "r"), col.names = c("Detalle", "Filas", "Nulos", "% Nulos"))
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+
+# Analisis de la base 
+df_original %>% group_by(DNUM_DOCUMENTO) %>% summarise(Cantidad_Solicitudes = n_distinct(DNUM_ID_SOLICITUD)) %>% filter(Cantidad_Solicitudes >1)
+# Vemos cuales son los que estan duplicados por DNI
+
+
+
+
+table(df_original$DDES_TIPO_SOLICITUD, df_original$VALIDAR)
+
+df_original %>% filter(DDES_TIPO_SOLICITUD=="Beneficiario")
+
+
+df_original %>% filter(VALIDAR=="NO", DDES_TIPO_SOLICITUD != "Beneficiario")
+df_original %>%
+  filter(VALIDAR == "NO", DDES_TIPO_SOLICITUD != "Beneficiario") %>%
+  select(30:67)
+
+df_original %>%
+  filter(VALIDAR == "NO", DDES_TIPO_SOLICITUD != "Beneficiario") %>%
+  select(1:29)
+
+
+
+df_original %>% filter(VALIDAR=="SI", DDES_TIPO_SOLICITUD != "Beneficiario")
+
+
+
+
+```
+
+
+## Variable DDJJ_COMPLETA
+
+
+```{r}
+
+columnas_DDJJ <- names(df_original)[str_detect(string = names(df_original),pattern = "PREGUNTA_")]
+
+df_original$Cant_Preguntas_NA <- apply(df_original[,columnas_DDJJ], 1, function(x) sum(is.na(x)))
+
+df_original$Porcentaje_Preguntas_NA <- df_original$Cant_Preguntas_NA / length(columnas_DDJJ)
+
+breaks <- seq(0,1,0.1)
+
+tope <- max(nrow(df_original[is.na(df_original$DDJJ_COMPLETA),]),
+            nrow(df_original[!is.na(df_original$DDJJ_COMPLETA),]))
+
+df_original %>% 
+  ggplot(aes(x = Porcentaje_Preguntas_NA)) +
+  geom_histogram(breaks = breaks) +
+  scale_x_continuous(breaks = breaks,labels = scales::percent_format(scale = 100)) +
+  geom_text(
+    stat = "bin", aes(label = after_stat(count)),
+    vjust = -.25,
+    breaks = breaks) +
+  theme_minimal() +
+  # theme(panel.grid.major = element_blank(),
+  #       panel.grid.minor = element_blank()) +
+  facet_wrap(~DDJJ_COMPLETA,nrow = n_distinct(df_original$DDJJ_COMPLETA),strip.position = "right") +
+  labs(title = "DDJJ Porcentaje de Preguntas vacías",subtitle = "DDJJ Completa vs Incompleta",y = "Cantidad de Filas", x = "Porcentaje de Preguntas vacías")
+
+```
+
+
+## Filtramos los datos
+
+```{r}
+# Definimos filtros
+# DNUM_DOCUMENTO != NA
+
+
+df_filtrado <- df_original %>% 
+                      dplyr::filter(!is.na(DNUM_DOCUMENTO))
+rm(df_original)
+```
+
+## Preexistencias
+
+Consideramos con preexistencias
+
+```{r}
+df_filtrado %>% 
+  dplyr::group_by(DNUM_ID_SOLICITUD,DNUM_DOCUMENTO) %>% 
+  dplyr::summarise(Cant_Patologias = n_distinct(PREGUNTA_9),
+                   Patologias = paste0(PREGUNTA_9,collapse = " / "))
+  
+cant_dni_variable <- function(df,var_select){
+  resumen_agrup <- df %>% 
+                      dplyr::group_by_at(var_select) %>% 
+                      dplyr::summarise(Cant_Socios = n_distinct(DNUM_DOCUMENTO)) %>% 
+                      dplyr::mutate(Porc = Cant_Socios / n_distinct(df$DNUM_DOCUMENTO) * 100) %>% 
+                      dplyr::arrange(Cant_Socios) %>% 
+                      dplyr::mutate_at(.vars = var_select,.funs = factor)
+  return(resumen_agrup)
+}
+
+df_filtrado$Preexistencias_Si_No <- ifelse(test = is.na(df_filtrado$PREGUNTA_9),
+                                           yes = "INCOMPLETO",
+                                           no = ifelse(test = df_filtrado$PREGUNTA_9 == "Ninguna de las anteriores",
+                                                       yes = "NO",
+                                                       no = "SI"))
+
+plot_total <- cant_dni_variable(df = df_filtrado,var_select = "Preexistencias_Si_No") %>%
+                              ggplot(aes(x="", y=Porc, fill=Preexistencias_Si_No)) +
+                              geom_bar(stat="identity", width=1, color="white") +
+                              coord_polar(theta = "y", start=0) +
+                              theme_void() + 
+                              theme(legend.text = element_text(size = 10)
+                                    ,legend.title = element_text(size = 10)) +
+                              geom_text(aes(x = 1, 
+                                            label = paste0(round(Porc,1),"%\n ",Cant_Socios,"/",n_distinct(df_filtrado$DNUM_DOCUMENTO))), 
+                                        color = "black", 
+                                        size=4,
+                                        position = position_stack(vjust = 0.5)) +
+                              labs(fill = "Preexistencias",title = "Porcentaje de Socios s/Preexistencias") +
+                              scale_fill_manual(values = c("NO" = "green3","SI" = "red","INCOMPLETO" = "yellow3"))
+  
+
+df_original_con_preexistencias <- df_filtrado %>% 
+                                      dplyr::filter(!is.na(DNUM_DOCUMENTO),
+                                                    Preexistencias_Si_No == "SI")
+
+# plot_total <- ggplotly(p = plot_total,tooltip = "")
+plot_total
+
+data_preexist <- cant_dni_variable(df = df_original_con_preexistencias,var_select = "PREGUNTA_9")%>%
+                            dplyr::mutate(PREGUNTA_9 = factor(PREGUNTA_9,levels = unique(PREGUNTA_9)))
+
+plot_preexist <- data_preexist  %>% 
+                            ggplot(aes_string(x = "PREGUNTA_9",y = "Cant_Socios")) +
+                            geom_bar(stat = "identity",aes(fill = "skyblue")) +
+                            geom_text(aes(label = Cant_Socios),
+                                      position = position_stack(vjust = 0.5),
+                                      color = "black",
+                                      size = 3.5) +
+                            labs(x = NULL,y = NULL,title = paste0("Cantidad de Socios según Tipo de Preexistencia")) +
+                            theme_minimal() +
+                            theme(legend.position = "none",
+                                  panel.grid.major = element_blank(),
+                                    panel.grid.minor = element_blank()) +
+                            coord_flip()
+
+plot_preexist <- ggplotly(p = plot_preexist,tooltip = "",height = 40 * n_distinct(df_original_con_preexistencias$PREGUNTA_9),width = 1800)
+
+plot_preexist
+
+
+```
+
+## Consumos de la preexistencia con mayor volumen
+
+- Buscamos la preexistencia con mayor volumen (mayor cantidad de personas)
+
+- Para cada persona, buscamos el did_socio correspondiente de acuerdo a la fecha de alta posterior a la fecha de solicitud.
+
+- Buscamos el consumo a partir de la fecha de alta (posterior a la solicitud)
+
+
+```{r}
+
+
+# busco la preexistencia con mayor volumen
+mayor_preexistencia <- data_preexist %>% 
+        dplyr::slice_max(order_by = Cant_Socios) %>% 
+        dplyr::pull(PREGUNTA_9)
+
+# tomo los dnis de los socios con la preexistencia con mayor volumen
+dnis_mayor_preexistencia <- df_filtrado %>% 
+                                dplyr::filter(PREGUNTA_9 == mayor_preexistencia) %>% 
+                                dplyr::pull(DNUM_DOCUMENTO) %>% 
+                                unique()
+
+# para esos dnis, buscamos el did_socio correspondiente de acuerdo a la fecha de la solicitud
+query_did_socios <- paste0("SELECT [DID_SOCIO]
+      ,[DNUM_DOC]
+      ,[FEC_ALTA]
+      ,[FEC_BAJA]
+      ,[FEC_VIGENCIA_PLAN]
+  FROM [DWDATAMART].[dbo].[DSOCIO]
+  WHERE DNUM_DOC IN (#)")
+
+
+did_socio_dni_mayor_preexistencia <- sqlQueryIn(conn = RODBC::odbcConnect(dsn = "datamart"),
+                                                values = as.character(dnis_mayor_preexistencia),
+                                                qry = query_did_socios)
+
+# para aquellos que no se encontro el DID_SOCIO, concluimos que no se afiliaron nunca
+df_original_con_preexistencias$Es_Socio <- df_original_con_preexistencias$DNUM_DOCUMENTO %in% did_socio_dni_mayor_preexistencia$DNUM_DOC
+
+# verificamos cuantas personas con la preexistencia principal fueron dados de alta
+df_original_con_preexistencias %>% 
+          dplyr::group_by(Es_Socio) %>% 
+          dplyr::summarise(Cant_Personas = n_distinct(DNUM_DOCUMENTO))
+
+# traemos la fecha de creacion, aprobacion, actualizacion y vigencia para definir el DID_SOCIO correcto 
+did_socio_dni_mayor_preexistencia <- did_socio_dni_mayor_preexistencia %>% 
+                                          dplyr::mutate(DNUM_DOC = trimws(DNUM_DOC)) %>% 
+                                          dplyr::left_join(y = df_original_con_preexistencias %>% 
+                                                              dplyr::distinct(DNUM_DOCUMENTO,
+                                                                              FECHA_CREACION,
+                                                                              FECHA_APROBACION,
+                                                                              FECHA_ACTUALIZACION,
+                                                                              FECHA_VIGENCIA) %>% 
+                                                             dplyr::rename(DNUM_DOC = DNUM_DOCUMENTO) %>% 
+                                                             dplyr::mutate(DNUM_DOC = trimws(DNUM_DOC)))
+
+# concluimos que lo correcto es tomar la fecha de alta posterior a la fecha de vigencia de la solicitud
+did_socio_vigente <- did_socio_dni_mayor_preexistencia %>% 
+                                dplyr::filter(FEC_ALTA >= FECHA_VIGENCIA)
+
+# traemos el did_socio al dataframe de solicitudes y definimos si la fecha es correcta verificando
+# si se hallo el DID_SOCIO
+df_socios <- df_original_con_preexistencias %>% 
+                        # dplyr::filter(Es_Socio) %>% 
+                        dplyr::left_join(y = did_socio_vigente %>% 
+                                                  dplyr::distinct(DNUM_DOC,DID_SOCIO) %>% 
+                                                  dplyr::rename(DNUM_DOCUMENTO = DNUM_DOC)) %>% 
+                        dplyr::mutate(Existe_Fecha_Alta_Ok = !is.na(DID_SOCIO))
+
+# contamos cantidad de socios con fecha ok y sin fecha ok (para los si estuvieron de alta alguna vez)
+df_socios %>% 
+      dplyr::group_by(Existe_Fecha_Alta_Ok) %>% 
+      dplyr::summarise(Cant_Socios = n_distinct(DNUM_DOCUMENTO))
+
+# query para traer los consumos a nivel socio-practica/medicamento
+query_consumos_socios_preexistencias <- paste0("SELECT CO.DID_SOCIO
+	  ,CO.DID_NOMENCLADOR
+	  ,CO.DID_MEDICAMENTO
+	  ,NOM.DCOD_PRACTICA
+	  ,NOM.DDES_PRACTICA
+	  ,NOM.CAPITULO
+	  ,NOM.SUBCAPITULO
+	  ,GP.GRUPO
+	  ,GP.GRUPO_PRESUPUESTO
+	  ,DC.DDES_CLASECOSTO AS 'DDES_GRUPO_PRESUPUESTO'
+	  ,ME.DCOD_MEDICAMENTO
+	  ,ME.DDES_MEDICAMENTO
+	  ,MIN(F.DNUM_FECHA) AS 'FECHA_PRIMER_CONSUMO'
+    ,SUM([NUM_CANTIDAD]) AS 'FRECUENCIA'
+    ,SUM([NUM_IMPORTE_TOTAL]) AS 'IMPORTE_TOTAL'
+  FROM [DWDATAMART].[dbo].[vDWCONSUMOS] CO
+  LEFT JOIN [DWDATAMART].[dbo].DNOMENCLADOR NOM ON NOM.DID_NOMENCLADOR = CO.DID_NOMENCLADOR
+  LEFT JOIN [DWDATAMART].[dbo].DMEDICAMENTO ME ON ME.DID_MEDICAMENTO = CO.DID_MEDICAMENTO
+  LEFT JOIN [DWDATAMART].[dbo].DFECHA F ON F.DID_FECHA = CO.DID_FECHA_PRESTACION
+  LEFT JOIN [DWDATAMART].[dbo].DGRUPO_PRESUPUESTO GP ON GP.DID_GRUPO_PRESUPUESTO = CO.DID_GRUPO_PRESUPUESTO
+  LEFT JOIN [DWDATAMART].[dbo].DCLASECOSTO DC ON DC.DID_CLASECOSTO = GP.DID_GRUPO_PRESUPUESTO
+  WHERE CO.DID_FILIALCONSUMO IN ('38') and
+      CO.DID_SOCIO IN (#)
+		AND CO.DID_NOMENCLADOR <> -1
+		AND CO.DID_TIPO_FACTURACION = 1
+  GROUP BY CO.DID_SOCIO
+	  ,CO.DID_NOMENCLADOR
+	  ,CO.DID_MEDICAMENTO
+	  ,NOM.DCOD_PRACTICA
+	  ,NOM.DDES_PRACTICA
+	  ,NOM.CAPITULO
+	  ,NOM.SUBCAPITULO
+	  ,GP.GRUPO
+	  ,GP.GRUPO_PRESUPUESTO
+	  ,DC.DDES_CLASECOSTO
+	  ,ME.DCOD_MEDICAMENTO
+	  ,ME.DDES_MEDICAMENTO")
+
+# buscamos los did_socio para realizar la query filtrada
+did_socios_ok <- df_socios %>% 
+                      dplyr::filter(!is.na(DID_SOCIO)) %>% 
+                      dplyr::pull(DID_SOCIO) %>% 
+                      unique() %>% 
+                      as.character()
+
+tic()
+consumos_socios_preexistencias <- sqlQueryIn(conn = RODBC::odbcConnect(dsn = "datamart"),
+                                                values = did_socios_ok,
+                                                qry = query_consumos_socios_preexistencias)
+toc()
+toc()
+
+```
+
+
+
