@@ -1,0 +1,556 @@
+---
+title: ""
+output: 
+  html_document:
+     toc: yes
+     code_folding: hide
+     toc_float: yes
+     df_print: paged
+     theme: united
+     code_download: true
+     includes:
+       before_body: logo.html
+     warning: FALSE
+date: "`r format(Sys.time(), '%d-%m-%Y')`"
+knit: (function(inputFile, encoding) {
+    rmarkdown::render(
+        inputFile, encoding = encoding,
+        output_file = file.path(
+            dirname(inputFile), paste0('EDA_Score_socios_preex_',Sys.Date(),'.html')))
+    })
+---
+
+<h1 style="color:#0066B3; text-align:left; margin-top: 20px;">Score Socios con Preexistencias</h1>
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE,warning = FALSE,message = FALSE)
+```
+
+
+```{r,echo=FALSE}
+#Carga de Librerias y funciones
+
+library(odbc)
+library(DBI)
+library(tidyverse)  # para dplyr
+library(lubridate)
+library(stringr)
+library(readr)
+library(ggplot2)
+library(plotly)
+library(openxlsx)
+library(readxl)
+library(tictoc)
+library(gridExtra)
+library(writexl)
+library(kableExtra)
+library(stringr)
+library(corrplot)
+library(solitude)
+library(isotree)
+library(dbscan)
+library(scales)
+library(rgl)
+library(tictoc)
+
+```
+
+```{r,echo=FALSE}
+
+#Funcion para establecer la conexión a SQL Server
+conectar_sql <- function(dsn, database, uid, pwd, timeout = 10) {
+  con <- dbConnect(odbc::odbc(),
+                   dsn,
+                   database = database,
+                   uid = uid,
+                   pwd = pwd,
+                   timeout = timeout)
+  return(con)}
+
+# Levantamos la funcion con encoding
+funserver <- Sys.getenv("RFUN_PATH")
+source(paste0(funserver,"/sqlQueryIn.R"))
+source(paste0(funserver,"/my_sqlQuery_encoding.R"))
+
+```
+
+
+```{r}
+
+# Levantamos la informacion correspondiente a la base de titulares
+query_text1 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[DCOD_PLAN_ALTA_f1]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[Composición Familiar] as Composicion_Familiar
+      ,[DNUM_CUIT_EMPRESA]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_TITULAR_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+query_text2 <- paste0("SELECT [DNUM_ID_SOLICITUD]
+      ,FC.DNUM_FECHA AS FECHA_CREACION
+      ,FA.DNUM_FECHA AS FECHA_APROBACION
+      ,FAC.DNUM_FECHA AS FECHA_ACTUALIZACION
+      ,FV.DNUM_FECHA AS FECHA_VIGENCIA
+      ,[DDES_TIPO_AFILIADO]
+      ,[DDES_TIPO_SOLICITUD]
+      ,[DCOD_MODO_CONTRATACION]
+      ,[DDES_ESTADO]
+      ,[APELLIDO_NOMBRE]
+      ,[DCOD_TIPO_DOCUMENTO]
+      ,[DNUM_DOCUMENTO]
+      ,[EDAD]
+      ,[TITULAR]
+      ,[GF_ORDEN]
+      ,[¿Cuál es tu sexo?] as Pregunta_1
+      ,[¿Estás embarazada?] as Pregunta_2
+      ,[¿Cuál es la fecha de tu última menstruación?] as Pregunta_3
+      ,[¿Te realizaste análisis en el último año?] as Pregunta_4
+      ,[¿Los resultados fueron normales?] as Pregunta_5
+      ,[¿Cuál fue el diagnóstico?] as Pregunta_6
+      ,[Altura]
+      ,[Peso]
+      ,[¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?] as Pregunta_7
+      ,[¿Qué patología de visión presenta?] as Pregunta_8
+      ,[¿Tenés o tuviste alguna de las siguientes patologías?] as Pregunta_9
+      ,[¿Qué patología de audición presenta?] as Pregunta_10
+      ,[¿Qué patología hereditaria presenta?] as Pregunta_11
+      ,[Alguna patologia que no este en el listado de visión] as Pregunta_12
+      ,[¿Qué patología psiquiátrica presenta?] as Pregunta_13
+      ,[Graduación de miopía] as Pregunta_14
+      ,[¿Te realizaron cirugías?] as Pregunta_15
+      ,[¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?] as Pregunta_16
+      ,[¿Cuál fue el año de la intervención del Sistema Nervioso?] as Pregunta_17
+      ,[¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?] as Pregunta_18
+      ,[¿Cuál fue el año de la intervención Abdominal?] as Pregunta_19
+      ,[¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?] as Pregunta_20
+      ,[¿Cuál fue el año de la intervención Sistema endocrino?] as Pregunta_21
+      ,[¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?] as Pregunta_22
+      ,[¿Cuál fue el año de la intervención Cardiológica?] as Pregunta_23
+      ,[¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?] as Pregunta_24
+      ,[¿Cuál fue el año de la intervención Ginecológica?] as Pregunta_25
+      ,[¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?] as Pregunta_26
+      ,[¿Cuál fue el año de la intervención Traumatológica?] as Pregunta_27
+      ,[¿Tiene protesis?] as Pregunta_28
+      ,[¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?] as Pregunta_29
+      ,[¿Cuál fue el año de la intervención Otras?] as Pregunta_30
+      ,[¿Que cirugía del listado?] as Pregunta_31
+      ,[¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?] as Pregunta_32
+      ,[Fecha baja certificado discapacidad] as Fecha_Baja_Cert_Disca
+      ,[Diagnóstico discapacidad] as Diag_Disca
+      ,[Fecha alta certificado discapacidad] as Fecha_Alta_Cert_Disca
+      ,[¿Te encontrás realizando alguno de los siguientes tratamientos?] as Pregunta_33
+      ,[¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?] as Pregunta_34
+      ,[¿Que tratamiento tienes pensado hacer?] as Pregunta_35
+      ,[DDJJ_Completa]
+      ,[¿Tienes alguna patología?] as Pregunta_36
+      ,[¿Padecés alguna/s patología/s además de las mencionadas anteriormente?] as Pregunta_37
+      ,[¿Tuviste internaciones?] as Pregunta_38
+      ,[Cuantas internaciones tuvo] as Pregunta_39
+      ,[Motivo de la internación] as Pregunta_40
+      ,[¿Cuál fue el año de la internación?] as Pregunta_41
+      ,[VALIDAR]
+      ,[IMC] 
+      FROM [DBPresupuestos].[dbo].[DWALTAS_ONLINE_DDJJ_GF_v2] A
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FC ON FC.DID_FECHA = A.DID_FECHA_CREACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FA ON FA.DID_FECHA = A.DID_FECHA_APROBACION
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FV ON FV.DID_FECHA = A.DID_FECHA_VIGENCIA
+      LEFT JOIN [DWDATAMART].[dbo].[DFECHA] FAC ON FAC.DID_FECHA = A.DID_FECHA_ACTUALIZACION")
+
+
+# Levantamos el de titulares
+#tic()
+#df_original <- my_sqlQuery_encoding(2,query_text1)
+#save(df_original, file = "J:/67_Preexistencia/df_original.RData")
+load("df_original.RData")
+#toc()
+
+# Levantamos el de grupo familiar
+#tic()
+#data_gf <- my_sqlQuery_encoding(2,query_text2)
+#save(data_gf, file = "J:/67_Preexistencia/data_gf.RData")
+# load("data_gf.RData")
+#toc()
+
+
+
+# Reemplazamos todas las cadenas vacias por NA en Titulares
+df_original[df_original == ""] <- NA
+# Reemplazamos todas las cadenas vacias por NA en Grupo Familiar
+# data_gf[data_gf == ""] <- NA
+
+```
+
+
+Se nos proporcionaron dos bases de datos correspondientes al formulario F1: una relativa a los titulares y otra al grupo familiar. El presente informe se centrará exclusivamente en el análisis de los titulares, reservando para una instancia posterior el estudio conjunto de ambas bases.
+`r paste0("La mínima fecha de creación  de los formularios corresponde a ", format(as.Date(as.character(min(df_original$FECHA_CREACION)), format = "%Y%m%d"), "%Y/%m/%d"), ".")`
+
+
+
+<h1 style="color:#0066B3;">Lectura de datos</h1>
+
+Redefinición de nombres de columnas:
+
+- Pregunta_1: ¿Cuál es tu sexo? 
+- Pregunta_2: ¿Estás embarazada?
+- Pregunta_3: ¿Cuál es la fecha de tu última menstruación?
+- Pregunta_4: ¿Te realizaste análisis en el último año?
+- Pregunta_5: ¿Los resultados fueron normales? 
+- Pregunta_6: ¿Cuál fue el diagnóstico? 
+- Pregunta_7: ¿Tenés o tuviste algún tipo de adicción a las drogas y/o al alcohol?
+- Pregunta_8: ¿Qué patología de visión presenta?
+- Pregunta_9: ¿Tenés o tuviste alguna de las siguientes patologías?
+- Pregunta_10: ¿Qué patología de audición presenta?
+- Pregunta_11: ¿Qué patología hereditaria presenta?
+- Pregunta_12: Alguna patologia que no este en el listado de visión
+- Pregunta_13: ¿Qué patología psiquiátrica presenta?
+- Pregunta_14: Graduación de miopía
+- Pregunta_15: ¿Te realizaron cirugías?
+- Pregunta_16: ¿Cuál fue la intervención Sistema nervioso? y ¿Cuál fue su diagnóstico?
+- Pregunta_17: ¿Cuál fue el año de la intervención del Sistema Nervioso?
+- Pregunta_18: ¿Cuál fue la intervención Abdominal? y ¿Cuál fue su diagnóstico?
+- Pregunta_19: ¿Cuál fue el año de la intervención Abdominal?
+- Pregunta_20: ¿Cuál fue la intervención Sistema endocrino? y ¿Cuál fue su diagnóstico?
+- Pregunta_21: ¿Cuál fue el año de la intervención Sistema endocrino?
+- Pregunta_22: ¿Cuál fue la intervención Cardiológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_23: ¿Cuál fue el año de la intervención Cardiológica?
+- Pregunta_24: ¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_25: ¿Cuál fue el año de la intervención Ginecológica?
+- Pregunta_26: ¿Cuál fue la intervención Traumatológica? y ¿Cuál fue su diagnóstico?
+- Pregunta_27: ¿Cuál fue el año de la intervención Traumatológica?
+- Pregunta_28: ¿Tiene protesis?
+- Pregunta_29: ¿Cuál fue la intervención Otras? y ¿Cuál fue su diagnóstico?
+- Pregunta_30: ¿Cuál fue el año de la intervención Otras?
+- Pregunta_31: ¿Que cirugía del listado?
+- Pregunta_32: ¿Tuviste, tenés o estás tramitando algún certificado de discapacidad?
+- Pregunta_32_Fecha_Baja: Fecha baja certificado discapacidad
+- Pregunta_32_Diagnostico: Diagnóstico discapacidad
+- Pregunta_32_Fecha_Alta: Fecha alta certificado discapacidad 
+- Pregunta_33: ¿Te encontrás realizando alguno de los siguientes tratamientos?
+- Pregunta_34: ¿Tenés planeado realizar algún tratamiento, práctica o intervención durante los próximos 6 meses?
+- Pregunta_35: ¿Que tratamiento tienes pensado hacer?
+- Pregunta_35_DDJJ: DDJJ_Completa
+- Pregunta_36: ¿Tienes alguna patología?
+- Pregunta_37: ¿Padecés alguna/s patología/s además de las mencionadas anteriormente?
+- Pregunta_38: ¿Tuviste internaciones?
+- Pregunta_39: Cuantas internaciones tuvo
+- Pregunta_40: Motivo de la internación 
+- Pregunta_41: ¿Cuál fue el año de la internación? 
+
+
+
+<h1 style="color:#0066B3;">Titulares</h1>
+## Cantidad de nulos en Id Solicitud y DNI 
+
+Dentro del presente análisis nos concentraremos principalmente en dos variables el N° de Solicitud y el N° de Documento, como se puede apreciar hay registros sin N° de Documento por lo tanto procedemos a eliminarlos:
+
+```{r}
+# Visualizacion de numero de nulos, podria ser en una tabla y los sacamos
+
+# Hay nulos en DOCUMENTO
+NULOSDNI = df_original[is.na(df_original$DNUM_DOCUMENTO),] %>% nrow()
+# Hay nulos en ID_SOLICITUD
+NULOSID = df_original[is.na(df_original$DNUM_ID_SOLICITUD),] %>% nrow()
+
+
+
+# Crear dataframe con los valores solicitados
+df_nulos <- data.frame(
+  Detalle = c("Variable DNI", "Variable ID Solicitud"),
+  Filas = format(rep(nrow(df_original), 2), big.mark = "."),  # Separador de miles
+  Nulos = format(c(NULOSDNI, NULOSID), big.mark = "."),  # Separador de miles
+  Porcentaje_Nulos = paste0(round(c(NULOSDNI, NULOSID) / nrow(df_original) * 100, 2), "%") # Formato porcentaje
+)
+
+# Crear tabla en Markdown con kable
+kable(df_nulos, format = "markdown", align = c("l", "r", "r", "r"), col.names = c("Detalle", "Filas", "Nulos", "% Nulos"))
+
+# Eliminamos las filas vacias en dni
+df_original = df_original[!is.na(df_original$DNUM_DOCUMENTO),] # 472559
+
+```
+
+Eliminamos las filas correspondientes a N° de Documento vacías.
+
+
+
+
+## Campo Tipo de Solicitud
+
+En base al relevamiento podemos continuar eliminando algunos registros según el Tipo de Solicitud:
+- PRE-DDJJ: cuando ingresa como Directo y/o Monotributista no tenemos que tenerlo en cuenta
+- Beneficiario: cuando se da de alta alguien en el grupo familiar, los campos de la declaración vienen vacíos como titular
+
+```{r}
+
+# Armamos la tabla
+tabla = table(df_original$DDES_TIPO_SOLICITUD)
+
+# Convertir tabla a data.frame
+tabla_df <- as.data.frame(table(df_original$DDES_TIPO_SOLICITUD))
+colnames(tabla_df) <- c("Tipo de Solicitud", "Cantidad")
+
+# Formatear y ampliar ancho
+tabla_df %>%
+  mutate(Cantidad = format(Cantidad, big.mark = ".", decimal.mark = ",")) %>%
+  kbl(align = c("l", "r"), col.names = c("Tipo de Solicitud", "Cantidad"), format = "html") %>%
+  kable_styling(bootstrap_options = c("striped", "hover"),
+                full_width = TRUE,
+                position = "center") %>%
+  row_spec(0, background = "#0066a2", color = "white", bold = TRUE)
+
+
+# Nos quedamos unicamente con las de F1+DDJJ
+df_original = df_original[df_original$DDES_TIPO_SOLICITUD == "F1+DDJJ",]
+
+```
+
+
+## Análisis de lógica de la base
+
+
+Tenemos duplicados por DNI y por ID SOLICITUD.
+
+No se registran más de un DNI para un mismo ID de Solicitud, pero puede venir en dos registros.
+
+Ejemplo: Una persona selecciona de una lista de patologías en la Pregunta_8:
+
+- Pregunta_8: ¿Qué patología de visión presenta?
+
+Si selecciona dos en esa pregunta el registro va a venir duplicado, todos los campos idénticos excepto Pregunta_8
+Ergo, dependiendo que análisis se requiera hacer se debe tomar por patología o por persona.
+
+Ejemplo: si se realiza un análisis de patologías debiera no tenerse en cuenta la cantidad de personas, porque una persona puede tener más de una patología. Vale la aclaración porque la cantidad de patologías puede no cerrar con la cantidad total de individuos ni siquiera con la totalidad de registros en sí. Además, no sabemos con certeza que otros campos pueden generar la apertura de registros como en el caso de la Pregunta_8. Sería ideal poder contar con el formulario porque ayudaría a la identificación de estos casos particulares.
+
+
+Si se registran DNI con más de una ID de Solicitud asociada.
+En principio sería correcto, ya que esto puede responder a, entre otras cosas, que la DDJJ tiene una validez de 48 horas, que se generaron diferentes solicitudes en diferentes períodos de tiempo etc.
+Además, tenemos casos con DNI erróneos como 111111.
+
+
+
+
+## Integridad del campo N° Solicitud y N° Documento
+
+```{r, echo=FALSE, results='asis'}
+
+# Vemos que haya un ID único por cada DNUM_ID_SOLICITUD
+cat(paste0("<b>Cantidad de Solicitudes con más de un DNI asociado: ",
+           df_original %>% 
+             group_by(DNUM_ID_SOLICITUD) %>% 
+             summarise(Cantidad_DNI = n_distinct(DNUM_DOCUMENTO)) %>% 
+             filter(Cantidad_DNI > 1) %>% 
+             nrow(),
+           "</b><br>"))
+
+# Vemos que haya una solicitud única por cada DNI 
+cat(paste0("<b>Cantidad de DNI con más de una Solicitud asociada: ",
+           df_original %>% 
+             group_by(DNUM_DOCUMENTO) %>% 
+             summarise(Cantidad_Solicitudes = n_distinct(DNUM_ID_SOLICITUD)) %>% 
+             filter(Cantidad_Solicitudes > 1) %>% 
+             nrow(),
+           "</b><br>"))
+
+
+# Hasta ahora tenemos una cantidad de filas
+cat(paste0("<b>Cantidad de registros en el dataframe de titulares (una vez depurado): ",
+           df_original %>% 
+             nrow(),
+           "</b><br>"))
+
+
+# Vemos la cantidad de DNI unicos
+cat(paste0("<b>Cantidad de DNI únicos en el dataframe de titulares (una vez depurado): ",
+           df_original %>% 
+             summarise(DNI_unicos = n_distinct(DNUM_DOCUMENTO)) %>% 
+             pull(DNI_unicos),
+           "</b><br>"))
+
+```
+
+
+## Integridad del formulario en sí
+
+Realizando el análisis de la base concluímos que podríamos tomar algunos conceptos generales pero no definiciones técnicas debido a la naturaleza del dato en sí.
+En el siguiente gráfico se aprecia esta hipótesis, primero identificamos todas las variables que comiencen con PREGUNTA_, luego se calcula cuántas de esas preguntas están vacías (NA) por cada fila y se transforma en un porcentaje.
+Los valores sobre las barras indican la cantidad de registros en cada grupo:
+
+```{r}
+columnas_DDJJ <- names(df_original)[str_detect(string = names(df_original), pattern = "PREGUNTA_")]
+
+df_original$Cant_Preguntas_NA <- apply(df_original[, columnas_DDJJ], 1, function(x) sum(is.na(x)))
+
+df_original$Porcentaje_Preguntas_NA <- df_original$Cant_Preguntas_NA / length(columnas_DDJJ)
+
+breaks <- seq(0, 1, 0.1)
+
+# Graficamos
+df_original %>% 
+  ggplot(aes(x = Porcentaje_Preguntas_NA)) +
+  geom_histogram(breaks = breaks, fill = "#0066a2", color = "white") +
+  scale_x_continuous(breaks = breaks, labels = scales::percent_format(scale = 100)) +
+  geom_text(
+    stat = "bin", 
+    aes(label = scales::comma(after_stat(count), big.mark = ".", decimal.mark = ",")),
+    vjust = -0.25,
+    breaks = breaks
+  ) +
+  theme_minimal() +
+  labs(
+    title = "Porcentaje de Preguntas incompletas",
+    y = "Cantidad de Filas", 
+    x = "Porcentaje de Preguntas incompletas"
+  )
+```
+
+## Preexistencia
+
+Para identificar la preexistencia vamos a tomar la PREGUNTA_9 como base:
+
+- Pregunta_9: ¿Tenés o tuviste alguna de las siguientes patologías?
+
+Si bien del relevamiento surge que toman además otras variables para identificar si va a cotizar o no como ser:
+
+- Pregunta_38: ¿Tuviste internaciones?
+
+Y otra que nos llamó la atención fue la pregunta:
+
+- Pregunta_37: ¿Padecés alguna/s patología/s además de las mencionadas anteriormente?
+
+La cual genera varias inconsistencias con respecto a la PREGUNTA_9.
+
+Para tomar una definición sobre los datos que quedaron en la base, vamos a generar una visualización con los valores más frecuentes en la variable PREGUNTA_9 sin contar los valores nulos.
+Los valores nulos en esa PREGUNTA_9 son de `r scales::comma(df_original %>% filter(is.na(PREGUNTA_9)) %>% nrow(), big.mark = ".", decimal.mark = ",")` registros sobre `r scales::comma(nrow(df_original), big.mark = ".", decimal.mark = ",")` registros totales.
+
+Es importante aclarar que el gráfico refleja la cantidad de registros y no de personas ni de solicitudes, recordemos que:
+
+- una misma solicitud puede tener múltiples registros (varias patologías) y,
+- una misma persona puede haber generado más de una solicitud con diferentes respuestas
+
+
+```{r}
+library(dplyr)
+library(plotly)
+
+# Top 5 + Otras
+top5 <- df_original %>%
+  filter(!is.na(PREGUNTA_9)) %>%
+  count(PREGUNTA_9, sort = TRUE) %>%
+  slice_max(n, n = 5)
+
+df_plot <- df_original %>%
+  filter(!is.na(PREGUNTA_9)) %>%
+  count(PREGUNTA_9) %>%
+  mutate(PREGUNTA_9 = ifelse(PREGUNTA_9 %in% top5$PREGUNTA_9, PREGUNTA_9, "Otras")) %>%
+  group_by(PREGUNTA_9) %>%
+  summarise(n = sum(n)) %>%
+  ungroup() %>%
+  mutate(porcentaje = n / sum(n),
+         etiqueta = paste0(
+           PREGUNTA_9, "<br>",
+           "Cantidad: ", format(n, big.mark = ".", decimal.mark = ","), "<br>",
+           "Porcentaje: ", sprintf("%.2f%%", porcentaje))
+  ) %>%
+  arrange(desc(porcentaje))
+
+# Gráfico de torta con solo porcentaje
+plot_ly(
+  data = df_plot,
+  labels = ~PREGUNTA_9,
+  values = ~n,
+  type = "pie",
+  textinfo = "percent",      # Solo porcentaje en la torta
+  hoverinfo = "text",
+  text = ~etiqueta,
+  marker = list(line = list(color = '#FFFFFF', width = 1)),
+  domain = list(x = c(0, 0.6))
+) %>%
+  layout(
+    title = "Top 5 respuestas en PREGUNTA_9 (sin NA)",
+    legend = list(
+      x = 0.7,
+      y = 0.5,
+      yanchor = "middle"
+    ),
+    margin = list(l = 40, r = 160, b = 40, t = 40),
+    height = 500,
+    width = 800
+  )
+
+```
+
+
+## Preexistencia
+
+
+
+
+
+
+
+
