@@ -342,7 +342,10 @@ Eliminamos las filas correspondientes a N° de Documento vacías.
 ## Campo Tipo de Solicitud
 
 En base al relevamiento podemos continuar eliminando algunos registros según el Tipo de Solicitud:
+
+
 - PRE-DDJJ: cuando ingresa como Directo y/o Monotributista no tenemos que tenerlo en cuenta
+
 - Beneficiario: cuando se da de alta alguien en el grupo familiar, los campos de la declaración vienen vacíos como titular
 
 ```{r}
@@ -381,10 +384,10 @@ Ejemplo: Una persona selecciona de una lista de patologías en la Pregunta_8:
 
 - Pregunta_8: ¿Qué patología de visión presenta?
 
-Si selecciona dos en esa pregunta el registro va a venir duplicado, todos los campos idénticos excepto Pregunta_8
+Si selecciona dos en esa pregunta el registro va a venir duplicado, todos los campos idénticos excepto Pregunta_8.
 Ergo, dependiendo que análisis se requiera hacer se debe tomar por patología o por persona.
 
-Ejemplo: si se realiza un análisis de patologías debiera no tenerse en cuenta la cantidad de personas, porque una persona puede tener más de una patología. Vale la aclaración porque la cantidad de patologías puede no cerrar con la cantidad total de individuos ni siquiera con la totalidad de registros en sí. Además, no sabemos con certeza que otros campos pueden generar la apertura de registros como en el caso de la Pregunta_8. Sería ideal poder contar con el formulario porque ayudaría a la identificación de estos casos particulares.
+Ejemplo: si se realiza un análisis de patologías debiera no tenerse en cuenta la cantidad de personas, porque una persona puede tener más de una patología. Vale la aclaración porque la cantidad de patologías puede no ser igual a la cantidad total de individuos ni siquiera con la totalidad de registros en sí. Además, no sabemos con certeza que otros campos pueden generar la apertura de registros como en el caso de la Pregunta_8. Sería ideal poder contar con el formulario porque ayudaría a la identificación de estos casos particulares.
 
 
 Si se registran DNI con más de una ID de Solicitud asociada.
@@ -545,7 +548,275 @@ plot_ly(
 ```
 
 
-## Preexistencia
+## Análisis sobre Dificultades en la visión
+
+
+El top de patologías se lo lleva "Dificultades en la visión", podemos aperturar esa variable si tomamos en cuenta la PREGUNTA_8:
+
+- Pregunta_8: ¿Qué patología de visión presenta?
+
+
+```{r}
+
+library(dplyr)
+library(plotly)
+
+# 1. Filtrar los casos que respondieron "Dificultades en la visión" en PREGUNTA_9
+df_vision <- df_original %>%
+  filter(PREGUNTA_9 == "Dificultades en la visión")
+
+# 2. Contar ocurrencias en PREGUNTA_8, incluyendo los NA
+df_p8 <- df_vision %>%
+  mutate(PREGUNTA_8 = ifelse(is.na(PREGUNTA_8), "Sin respuesta", as.character(PREGUNTA_8))) %>%
+  count(PREGUNTA_8, sort = TRUE) %>%
+  mutate(
+    Porcentaje = n / sum(n),
+    Etiqueta = paste0(PREGUNTA_8, " (", scales::percent(Porcentaje, accuracy = 0.1), ")")
+  )
+
+# 3. Crear gráfico interactivo de torta con tooltip de porcentaje
+plot_ly(
+  data = df_p8,
+  labels = ~PREGUNTA_8,
+  values = ~n,
+  type = "pie",
+  textinfo = "percent",
+  hovertemplate = "%{label}<br>%{percent:.2%}<extra></extra>",
+  marker = list(colors = RColorBrewer::brewer.pal(n = max(3, nrow(df_p8)), name = "Set3"))
+) %>%
+  layout(
+    title = "Distribución de PREGUNTA_8 entre quienes reportaron dificultades en la visión",
+    showlegend = TRUE,
+    legend = list(orientation = "v", x = 1, y = 0.5)
+  )
+
+```
+
+
+## Análisis sobre Miopía 
+
+Para tomar en cuenta si el individuo tiene preexistencia con Miopía es necesario sumar el campo PREGUNTA_14:
+
+- Pregunta_14: Graduación de miopía
+
+La variable no presenta valores nulos y contiene únicamente dos categorías. Para el análisis próximo se considera únicamente la categoría "Igual o mayor a -6 dioptrías", que corresponderían a los registros con preexistencia:
+
+```{r}
+
+# Dejamos unicamente las que sean de miopia
+df_vision = df_vision[df_vision$PREGUNTA_8=="Miopía",]
+
+# Preparar los datos
+df_p14 <- df_vision %>%
+  mutate(PREGUNTA_14 = ifelse(is.na(PREGUNTA_14), "Sin respuesta", PREGUNTA_14)) %>%
+  count(PREGUNTA_14, sort = TRUE) %>%
+  mutate(
+    Porcentaje = n / sum(n),
+    Etiqueta = paste0(
+      PREGUNTA_14, "<br>",
+      "Cantidad: ", n, "<br>",
+      "Porcentaje: ", scales::percent(Porcentaje, accuracy = 0.1)
+    )
+  )
+
+# Gráfico interactivo
+plot_ly(
+  data = df_p14,
+  x = ~n,
+  y = ~reorder(PREGUNTA_14, n),
+  type = "bar",
+  orientation = "h",
+  text = ~Etiqueta,
+  hoverinfo = "text",
+  marker = list(color = "#0066a2")
+) %>%
+  layout(
+    title = "Distribución de respuestas en PREGUNTA_14",
+    xaxis = list(title = "Cantidad"),
+    yaxis = list(title = ""),
+    margin = list(l = 150)
+  )
+
+# Filtramos los que tienen preexistencia (por ahora no, lo vamos a dejar)
+#df_vision = df_vision[df_vision$PREGUNTA_14=="Igual o mayor a -6 dioptrías",]
+
+```
+
+
+
+## Análisis de consumos de los socios con preexistencia
+
+
+Recapitulando el análisis tenemos un dataframe filtrado con:
+
+- Pregunta_9: ¿Tenés o tuviste alguna de las siguientes patologías? = Dificultades en la visión
+- Pregunta_8: ¿Qué patología de visión presenta?                    = Miopía
+- Pregunta_14: Graduación de miopía                                 = Igual o mayor a -6 dioptrías
+
+
+Sobre ese dataframe, que cuenta con `r scales::comma(df_vision %>% nrow(), big.mark = ".", decimal.mark = ",")` registros, identificamos `r scales::comma(n_distinct(df_vision$DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ",")` DNI únicos. A partir de esta base, analizaremos sus consumos y contribuciones marginales, teniendo en cuenta que la fecha de los consumos debe ser posterior a la fecha de vigencia establecida en el Formulario.
+Dado que necesitamos una única fecha de vigencia por socio, nos quedaremos con la última registrada, asumiendo que la existencia de múltiples solicitudes puede deberse a rechazos u omisiones previas.
+
+
+```{r}
+
+#Obtenemos el unique de DNUM_DOCUMENTO con la ultima fecha de vigencia para ir a buscar los consumos
+df_vigencia_max <- df_vision %>%
+  group_by(DNUM_DOCUMENTO) %>%
+  summarise(FECHA_VIGENCIA = max(FECHA_VIGENCIA, na.rm = TRUE)) %>%
+  ungroup()
+
+# Para esos DNI vamos a traer el DID_SOCIO
+query_did_socios <- paste0("SELECT [DID_SOCIO]
+      ,[DNUM_DOC]
+      ,[FEC_ALTA]
+      ,[FEC_BAJA]
+      ,[FEC_VIGENCIA_PLAN]
+  FROM [DWDATAMART].[dbo].[DSOCIO]
+  WHERE DNUM_DOC IN (#)")
+
+# Traemos los valores
+SOCIOS <- sqlQueryIn(odbcConnect("datamart"), unique(df_vigencia_max$DNUM_DOCUMENTO), query_did_socios)
+
+
+# Hacemos un left_join para traer la fecha de vigencia maxima y poder identificar el DID_SOCIO correspondiente
+SOCIOS = SOCIOS %>% left_join(df_vigencia_max, by=c("DNUM_DOC"="DNUM_DOCUMENTO")) # 1936 LINEAS
+
+
+library(lubridate)
+SOCIOS$FEC_ALTA <- ymd(SOCIOS$FEC_ALTA)
+SOCIOS$FEC_BAJA <- ymd(SOCIOS$FEC_BAJA)
+SOCIOS$FEC_VIGENCIA_PLAN <- ymd(SOCIOS$FEC_VIGENCIA_PLAN)
+SOCIOS$FECHA_VIGENCIA <- ymd(SOCIOS$FECHA_VIGENCIA)
+
+
+# Hacemos la resta
+SOCIOS$RESTA <- as.numeric(SOCIOS$FEC_ALTA - SOCIOS$FECHA_VIGENCIA)
+
+
+# Armamos las variables
+TOPEDIAS = 10
+
+# Armamos las categorias
+SOCIOS$CATEGORIA = ifelse(SOCIOS$RESTA >= 0 & SOCIOS$RESTA <= TOPEDIAS, "OK", ifelse(SOCIOS$RESTA <0, "ALTA_ANTERIOR_SOLICITUD", "ALTA_MAS10_DIAS"))
+
+# Grafico fue dado de alta o no puede stacked bar aperturado por menor menos 6 y mayor a menos 6
+
+# Una tabla especificando todo de rows menor a menos 6 y mayor a menos 6 y variables, cant de socios, cant de socios identificados en DSOCIOS, cantidad que ingresaron somos socios, cantidad que consumieron la operacion y todo bien explicito
+# Consumos de oftalmologia
+
+
+# Filtramos unicamente los que sean OK
+SOCIOS = SOCIOS %>% dplyr::filter(CATEGORIA=="OK")
+
+
+
+
+# Vemos si hay duplicados 
+#sum(duplicated(SOCIOS$DNUM_DOCUMENTO))
+
+# Una vez chequeado que no hay duplicados vamos a buscar los consumos
+
+# query para traer los consumos a nivel socio-practica/medicamento
+query_consumos_socios_preexistencias <- paste0("SELECT CO.DID_SOCIO
+	  ,CO.DID_NOMENCLADOR
+	  ,CO.DID_MEDICAMENTO
+	  ,NOM.DCOD_PRACTICA
+	  ,NOM.DDES_PRACTICA
+	  ,NOM.CAPITULO
+	  ,NOM.SUBCAPITULO
+	  ,GP.GRUPO
+	  ,GP.GRUPO_PRESUPUESTO
+	  ,DC.DDES_CLASECOSTO AS 'DDES_GRUPO_PRESUPUESTO'
+	  ,ME.DCOD_MEDICAMENTO
+	  ,ME.DDES_MEDICAMENTO
+	  ,ATRIBUTO_8
+	  ,F.DNUM_FECHA 
+    ,SUM([NUM_CANTIDAD]) AS 'FRECUENCIA'
+    ,SUM([NUM_IMPORTE_TOTAL]) AS 'IMPORTE_TOTAL'
+  FROM [DWDATAMART].[dbo].[vDWCONSUMOS] CO
+  LEFT JOIN [DWDATAMART].[dbo].DNOMENCLADOR NOM ON NOM.DID_NOMENCLADOR = CO.DID_NOMENCLADOR
+  LEFT JOIN [DWDATAMART].[dbo].DMEDICAMENTO ME ON ME.DID_MEDICAMENTO = CO.DID_MEDICAMENTO
+  LEFT JOIN [DWDATAMART].[dbo].DFECHA F ON F.DID_FECHA = CO.DID_FECHA_PRESTACION
+  LEFT JOIN [DWDATAMART].[dbo].DGRUPO_PRESUPUESTO GP ON GP.DID_GRUPO_PRESUPUESTO = CO.DID_GRUPO_PRESUPUESTO
+  LEFT JOIN [DWDATAMART].[dbo].DCLASECOSTO DC ON DC.DID_CLASECOSTO = GP.DID_GRUPO_PRESUPUESTO
+  WHERE CO.DID_FILIALCONSUMO IN ('38') and
+      CO.DID_SOCIO IN (#)
+		AND CO.DID_NOMENCLADOR <> -1
+		AND CO.DID_TIPO_FACTURACION = 1
+  GROUP BY CO.DID_SOCIO
+	  ,CO.DID_NOMENCLADOR
+	  ,CO.DID_MEDICAMENTO
+	  ,NOM.DCOD_PRACTICA
+	  ,NOM.DDES_PRACTICA
+	  ,NOM.CAPITULO
+	  ,NOM.SUBCAPITULO
+	  ,GP.GRUPO
+	  ,GP.GRUPO_PRESUPUESTO
+	  ,ATRIBUTO_8
+	  ,F.DNUM_FECHA
+	  ,DC.DDES_CLASECOSTO
+	  ,ME.DCOD_MEDICAMENTO
+	  ,ME.DDES_MEDICAMENTO")
+
+# Deberiamos filtrar por la fecha de vigencia
+
+
+
+CONSUMOS <- sqlQueryIn(odbcConnect("datamart"), as.character(SOCIOS$DID_SOCIO), query_consumos_socios_preexistencias)
+
+
+
+
+
+
+# Tenemos 1936 registros ahora tenemos que identificar que DID_SOCIO corresponde a ese DNI con esa solicitud
+# Porque un mismo DNI puede tener más de un DID_SOCIO, pero necesitamos ese DID_SOCIO para obtener los consumos 
+# Tenemos 3 escenarios, los que la fecha de vigencia coincide con la fecha de alta o varía en + 10 dias (menos no puede ser) 
+# Los que la fecha de alta es anterior a la fecha de vigencia (no corresponde tomarlos)
+# Los que la fecha de alta es posterior a mas de 10 dias de la fecha de vigencia (no lo vamos a tomar)
+
+
+# Vamos a hacer un ifelse con 3 categorias sobre la variable resta
+#SOCIOS$CATEGORIA = ifelse()
+
+
+
+# Mostramos una tabla con la definicion y continuamos con el escenario 1 
+# Hay que revisar nuevamente que tengamos un did_socio por cada dni una vez que nos quedemos con el escenario 1
+# Una vez con eso seguimos 
+
+
+
+```
+
+
+
+
+
+
+
+```{r}
+
+# Bueno aca esperaría cuantos de esos se dieron de alta tipo tabla,
+# Ademas otra variable si utilizaron la operacion que nosotros identificamos y ademas traer el promedio de la cmg
+# Como te queda bien completa una tabla con:
+
+# - Totalidad de socios unicos que pusieron miopia y califican como preexistencia
+# - De ese total que % se dio de alta como socio (siempre teniendo en cuenta las fechas)
+# - De eso que % consumio esa operacion en X meses mas o en total y despues si queres tomas en cuenta las fechas (aunque me parece indiferente)
+# - Tambien promedio de CMG de ese grupo para entender si afecta (porque obviamente a esos le sube el devengado capaz da bien igual)
+# - Explicitar que no se toma la suma de consumos porque algunos entraron hace un mes otros hace años no tiene sentido, ademas que no se pueden comparar con los que se operaron de miopía y no tuvieron preexistencia.
+# Podemos sacarlo sumando los consumos y diviendo por la cantidad de meses.
+
+```
+
+
+
+
+
+
+
 
 
 
