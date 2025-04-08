@@ -52,6 +52,7 @@ library(dbscan)
 library(scales)
 library(rgl)
 library(tictoc)
+library(RODBC)
 
 ```
 
@@ -242,6 +243,23 @@ load("df_original.RData")
 df_original[df_original == ""] <- NA
 # Reemplazamos todas las cadenas vacias por NA en Grupo Familiar
 # data_gf[data_gf == ""] <- NA
+
+
+# Sacamos los puntos de la columna
+df_original$DNUM_DOCUMENTO <- gsub("\\.", "", df_original$DNUM_DOCUMENTO)
+
+# Vamos a limpiar los DNI
+df_original$DNUM_DOCUMENTO2 = as.character(as.numeric(df_original$DNUM_DOCUMENTO))
+
+# Ifelse para completar
+df_original$DNUM_DOCUMENTO = ifelse(is.na(df_original$DNUM_DOCUMENTO2), df_original$DNUM_DOCUMENTO, df_original$DNUM_DOCUMENTO2)
+
+# Eliminamos los valores vacios antes y despues
+df_original$DNUM_DOCUMENTO = trimws(df_original$DNUM_DOCUMENTO)
+
+# Eliminamos el campo
+df_original$DNUM_DOCUMENTO2 = NULL
+
 
 ```
 
@@ -500,6 +518,7 @@ Es importante aclarar que el gráfico refleja la cantidad de registros y no de p
 library(dplyr)
 library(plotly)
 
+
 # Top 5 + Otras
 top5 <- df_original %>%
   filter(!is.na(PREGUNTA_9)) %>%
@@ -511,38 +530,33 @@ df_plot <- df_original %>%
   count(PREGUNTA_9) %>%
   mutate(PREGUNTA_9 = ifelse(PREGUNTA_9 %in% top5$PREGUNTA_9, PREGUNTA_9, "Otras")) %>%
   group_by(PREGUNTA_9) %>%
-  summarise(n = sum(n)) %>%
-  ungroup() %>%
-  mutate(porcentaje = n / sum(n),
-         etiqueta = paste0(
-           PREGUNTA_9, "<br>",
-           "Cantidad: ", format(n, big.mark = ".", decimal.mark = ","), "<br>",
-           "Porcentaje: ", sprintf("%.2f%%", porcentaje))
+  summarise(n = sum(n), .groups = "drop") %>%
+  mutate(
+    porcentaje = n / sum(n),
+    etiqueta = paste0(
+      PREGUNTA_9, "<br>",
+      "Cantidad: ", format(n, big.mark = ".", decimal.mark = ","), "<br>",
+      "Porcentaje: ", sprintf("%.2f%%", porcentaje * 100)
+    )
   ) %>%
-  arrange(desc(porcentaje))
+  arrange(n)
 
-# Gráfico de torta con solo porcentaje
+# Gráfico de barras horizontales
 plot_ly(
   data = df_plot,
-  labels = ~PREGUNTA_9,
-  values = ~n,
-  type = "pie",
-  textinfo = "percent",      # Solo porcentaje en la torta
-  hoverinfo = "text",
+  x = ~n,
+  y = ~reorder(PREGUNTA_9, n),  # orden descendente
+  type = "bar",
+  orientation = "h",
   text = ~etiqueta,
-  marker = list(line = list(color = '#FFFFFF', width = 1)),
-  domain = list(x = c(0, 0.6))
+  hoverinfo = "text",
+  marker = list(color = "steelblue")
 ) %>%
   layout(
     title = "Top 5 respuestas en PREGUNTA_9 (sin NA)",
-    legend = list(
-      x = 0.7,
-      y = 0.5,
-      yanchor = "middle"
-    ),
-    margin = list(l = 40, r = 160, b = 40, t = 40),
-    height = 500,
-    width = 800
+    xaxis = list(title = "Cantidad"),
+    yaxis = list(title = ""),
+    margin = list(l = 100, r = 40, b = 60, t = 50)
   )
 
 ```
@@ -644,7 +658,7 @@ plot_ly(
 
 
 
-## Análisis de consumos de los socios con preexistencia
+## Análisis de consumos de los socios con y sin preexistencia en Miopía
 
 
 Recapitulando el análisis tenemos un dataframe filtrado con:
@@ -654,17 +668,146 @@ Recapitulando el análisis tenemos un dataframe filtrado con:
 - Pregunta_14: Graduación de miopía                                 = Igual o mayor a -6 dioptrías
 
 
-Sobre ese dataframe, que cuenta con `r scales::comma(df_vision %>% nrow(), big.mark = ".", decimal.mark = ",")` registros, identificamos `r scales::comma(n_distinct(df_vision$DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ",")` DNI únicos. A partir de esta base, analizaremos sus consumos y contribuciones marginales, teniendo en cuenta que la fecha de los consumos debe ser posterior a la fecha de vigencia establecida en el Formulario.
+Sobre ese dataframe, que cuenta con `r scales::comma(df_vision %>% nrow(), big.mark = ".", decimal.mark = ",")` registros, identificamos `r scales::comma(n_distinct(df_vision$DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ",")` DNI únicos. A partir de esta base, analizaremos sus consumos y contribuciones marginales, teniendo en cuenta que la fecha de alta del socio debe ser posterior a la fecha de vigencia establecida en el Formulario.
 Dado que necesitamos una única fecha de vigencia por socio, nos quedaremos con la última registrada, asumiendo que la existencia de múltiples solicitudes puede deberse a rechazos u omisiones previas.
+
+Si tomamos la FECHA_VIGENCIA tenemos dos casos que en la misma última FECHA_VIGENCIA (que es coincidente entre dos registros en ambas), tienen respuestas diferentes en la PREGUNTA_14:
+
 
 
 ```{r}
+# Nos vamos a quedar con la ultima fecha de creacion
+# Porque si tomamos fecha vigencia tenemos para la misma persona la misma fecha de vigencia con miopia con y sin preexistencia
+# Es decir en una pone mayor a menos 6 dioptrias y en la otra menor a menos 6 dioptrias
 
-#Obtenemos el unique de DNUM_DOCUMENTO con la ultima fecha de vigencia para ir a buscar los consumos
-df_vigencia_max <- df_vision %>%
+df_vision_filtrado_FV <- df_vision %>%
   group_by(DNUM_DOCUMENTO) %>%
-  summarise(FECHA_VIGENCIA = max(FECHA_VIGENCIA, na.rm = TRUE)) %>%
-  ungroup()
+  mutate(FECHA_VIGENCIA_ULTIMA = max(FECHA_VIGENCIA, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  filter(FECHA_VIGENCIA_ULTIMA == FECHA_VIGENCIA)
+
+df_vision_filtrado_FV = df_vision_filtrado_FV %>%
+  group_by(DNUM_DOCUMENTO, FECHA_VIGENCIA_ULTIMA) %>%
+  summarise(RTAS_DISTINTAS_PREGUNTA_14 = n_distinct(PREGUNTA_14)) %>%
+  filter(RTAS_DISTINTAS_PREGUNTA_14 > 1)
+
+df_vision_filtrado_FV %>%
+  kbl(
+    caption = "<b>Documentos con más de una respuesta distinta en PREGUNTA_14</b>", 
+    format = "html", 
+    align = "c", 
+    col.names = c("DNI", "Fecha de Vigencia", "Respuestas Distintas")
+  ) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped", "hover", "condensed"),
+    position = "center"
+  ) %>%
+  row_spec(0, background = "#0072CE", color = "white")  # Encabezado estilo OSDE
+
+```
+
+## Casos particulares I
+
+Debido a esta sitación nos vemos obligados a realizar el análisis pero en vez de por FECHA_VIGENCIA utilizaremos la FECHA_CREACION, una vez que avanzamos con esta definición nos encontramos que también el formulario apertura por la PREGUNTA_31 y por la PREGUNTA_24:
+
+- Pregunta_31: ¿Que cirugía del listado?
+
+```{r}
+# Por lo tanto vamos a usar la FECHA CREACION
+df_vision_filtrado <- df_vision %>%
+  group_by(DNUM_DOCUMENTO) %>%
+  mutate(FECHA_CREACION_ULTIMA = max(FECHA_CREACION, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  filter(FECHA_CREACION_ULTIMA == FECHA_CREACION)
+
+# Como la PREGUNTA_31 apertura tal cual a la PREGUNTA_9 vamos a hacer un distinct de los campos que vamos a utilizar ellos son
+
+PREGUNTA_31_DF = df_vision_filtrado %>% group_by(DNUM_DOCUMENTO, FECHA_VIGENCIA, FECHA_CREACION_ULTIMA, PREGUNTA_14) %>% summarise(CANT_RESPUESTAS_PREGUNTA = n_distinct(DNUM_ID_SOLICITUD)) %>% filter(CANT_RESPUESTAS_PREGUNTA >1)
+
+
+
+
+PREGUNTA_31_DF %>%
+  kbl(
+    caption = "<b>Solicitudes con más de una respuesta distinta en PREGUNTA_31</b>", 
+    format = "html", 
+    align = "c", 
+    col.names = c("DNI", "Fecha de Vigencia", "Última Fecha Creación", "Pregunta 14", "Cantidad de Respuestas")
+  ) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped", "hover", "condensed"),
+    position = "center"
+  ) %>%
+  row_spec(0, background = "#0072CE", color = "white")  # Encabezado estilo OSDE
+
+
+```
+
+## Casos particulares II
+
+Dado que para el análisis de consumos la variable PREGUNTA_31 no resulta relevante, decidimos continuar con el análisis prescindiendo de ella. Sin embargo, nos encontramos con dos casos particulares en los que, si bien comparten la misma última FECHA_CREACION, presentan dos FECHA_VIGENCIA distintas. Como utilizaremos esta última variable para realizar el cruce con los consumos, se definió tomar, en estos casos, la última FECHA_VIGENCIA registrada.
+
+
+```{r}
+# Dejamos los campos que nos interesan
+df_vision_filtrado = df_vision_filtrado %>% ungroup() %>%  distinct(DNUM_DOCUMENTO, FECHA_VIGENCIA, FECHA_CREACION_ULTIMA, PREGUNTA_14) 
+
+# Aca mostramos lo que aparece casos especiales a tener en cuenta
+PROBLEMA = df_vision_filtrado %>%
+  group_by(DNUM_DOCUMENTO) %>%
+  filter(n() > 1)
+
+
+# Lo pasamos a fecha
+PROBLEMA <- PROBLEMA %>% mutate(FECHA_VIGENCIA = ymd(FECHA_VIGENCIA))
+PROBLEMA <- PROBLEMA %>% mutate(FECHA_CREACION_ULTIMA = ymd(FECHA_CREACION_ULTIMA))
+
+# Lo pasamos a character por las dudas
+PROBLEMA$FECHA_VIGENCIA = as.character(PROBLEMA$FECHA_VIGENCIA)
+PROBLEMA$FECHA_CREACION_ULTIMA = as.character(PROBLEMA$FECHA_CREACION_ULTIMA)
+
+# Ponemos bien en formato
+PROBLEMA <- PROBLEMA %>% mutate(DNUM_DOCUMENTO = comma(as.numeric(DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ","))
+
+
+PROBLEMA %>%
+  kbl(
+    caption = "<b>DNI con una misma Fecha de Creación y dos Fechas de Vigencia</b>", 
+    format = "html", 
+    align = "c", 
+    col.names = c("DNI", "Fecha de Vigencia", "Última Fecha Creación", "Pregunta 14")
+  ) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped", "hover", "condensed"),
+    position = "center"
+  ) %>%
+  row_spec(0, background = "#0072CE", color = "white")  # Encabezado estilo OSDE
+
+# kable de la tabla y continuamos
+```
+
+## Casos particulares III
+
+Una vez que nos quedamos con la última FECHA_VIGENCIA tenemos que obtener el DID_SOCIO correspondiente a ese N° de Documento con ese ID de Solicitud relacionado, por lo tanto al cruzar con la tabla DSOCIOS nos encontramos que para una misma Fecha de Alta (que coincide con la Fecha de Vigencia del Formulario) tenemos 13 DNI que tienen al menos 2 DID_SOCIO relacionados, los mismos se detallan a continuación y a la espera de definiciones se descartan para el análisis: 
+
+
+```{r}
+# Nos quedamos con la ultima FECHA VIGENCIA
+df_vision_filtrado <- df_vision_filtrado %>%
+  group_by(DNUM_DOCUMENTO, FECHA_CREACION_ULTIMA, PREGUNTA_14) %>%
+  mutate(FECHA_VIGENCIA_ULTIMA = max(FECHA_VIGENCIA, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  filter(FECHA_VIGENCIA_ULTIMA == FECHA_VIGENCIA)
+
+
+# Hasta aca tenemos todos los socios con miopia con mayor o menor a - seis dioptrias bien identificados
+# Este va a ser nuestro universo total, ahora lo vamos a cruzar con socios para obtener el did_socios
+# los que no cruzan bajo las definiciones que tomamos, son socios que no se dieron de alta y tendriamos
+# El primer proxy de la tabla de esta cantidad cuantos se dieron de alta
+
 
 # Para esos DNI vamos a traer el DID_SOCIO
 query_did_socios <- paste0("SELECT [DID_SOCIO]
@@ -676,12 +819,20 @@ query_did_socios <- paste0("SELECT [DID_SOCIO]
   WHERE DNUM_DOC IN (#)")
 
 # Traemos los valores
-SOCIOS <- sqlQueryIn(odbcConnect("datamart"), unique(df_vigencia_max$DNUM_DOCUMENTO), query_did_socios)
+DID_SOCIO <- sqlQueryIn(odbcConnect("datamart"), unique(df_vision_filtrado$DNUM_DOCUMENTO), query_did_socios)
 
 
 # Hacemos un left_join para traer la fecha de vigencia maxima y poder identificar el DID_SOCIO correspondiente
-SOCIOS = SOCIOS %>% left_join(df_vigencia_max, by=c("DNUM_DOC"="DNUM_DOCUMENTO")) # 1936 LINEAS
+SOCIOS = df_vision_filtrado %>% left_join(DID_SOCIO, by=c("DNUM_DOCUMENTO" = "DNUM_DOC"))
+# Ojo que no duplique 
+#nrow(df_vision_filtrado)
+#nrow(SOCIOS)
+# Esto una vez que hagas 
 
+#n_distinct(df_vision_filtrado$DNUM_DOCUMENTO)
+#n_distinct(SOCIOS$DNUM_DOCUMENTO)
+
+#names(df_vision_filtrado)
 
 library(lubridate)
 SOCIOS$FEC_ALTA <- ymd(SOCIOS$FEC_ALTA)
@@ -694,30 +845,200 @@ SOCIOS$FECHA_VIGENCIA <- ymd(SOCIOS$FECHA_VIGENCIA)
 SOCIOS$RESTA <- as.numeric(SOCIOS$FEC_ALTA - SOCIOS$FECHA_VIGENCIA)
 
 
+# Ahora vamos 
+SOCIOS = SOCIOS %>% group_by(DNUM_DOCUMENTO) %>% mutate(RESTA_MINIMA=min(RESTA), na.rm=TRUE) %>% filter(RESTA_MINIMA==RESTA | is.na(RESTA)) %>% ungroup()
+
+
+# Estos los vamos a mostrar y sacar del analisis
+AFILTRAR = SOCIOS %>%
+  group_by(DNUM_DOCUMENTO) %>%
+  filter(n() > 1) %>%
+  arrange(DNUM_DOCUMENTO) 
+
+
+# Filtramos para despues continuar
+SOCIOS = SOCIOS %>% filter(!DNUM_DOCUMENTO %in% unique(AFILTRAR$DNUM_DOCUMENTO))
+
+# Vamos a seleccionar algunas variabeles unicamente para mostrar
+AFILTRAR = AFILTRAR %>% select(DNUM_DOCUMENTO, DID_SOCIO, FEC_ALTA, FEC_BAJA, FEC_VIGENCIA_PLAN)
+
+# Ponemos bien en formato
+AFILTRAR <- AFILTRAR %>% mutate(DNUM_DOCUMENTO = comma(as.numeric(DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ","))
+
+
+AFILTRAR %>%
+  kbl(
+    caption = "<b>DNI con al menos dos DID_SOCIO (misma Fecha Alta y Fecha Vigencia Plan)</b>", 
+    format = "html", 
+    align = "c", 
+    col.names = c("DNI", "DID_SOCIO","Fecha Alta", "Fecha Baja", "Fecha de Vigencia")
+  ) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped", "hover", "condensed"),
+    position = "center"
+  ) %>%
+  row_spec(0, background = "#0072CE", color = "white")  # Encabezado estilo OSDE
+#n_distinct(AFILTRAR$DNUM_DOCUMENTO)
+
+```
+
+## Planteo de escenarios
+
+
+Definimos tomar 4 categorías posibles en la búsqueda de DID_SOCIO correlacionado con su ID de Solicitud:
+
+1- ALTA_ANTERIOR_SOLICITUD: La fecha de alta del Socio es anterior a la fecha de vigencia de la Solicitud análisis
+
+2- ALTA_MAS10_DIAS: La fecha de alta del Socio está dentro de los 10 días posteriores a la fecha de vigencia de la Solicitud
+
+3- OK: La fecha de alta del socio coincide con la fecha de vigencia o se encuentra, como máximo, hasta 10 días posteriores
+
+4- No se encuentra ese N° de Documento en la tabla DSOCIOS (socios sin dar de alta)
+
+
+Para el análisis tomaremos únicamente el punto 3, tal vez en base a definiciones se podría incorporar el punto 2. 
+
+```{r}
+
+# Aca si tenemos nuestro universo total unico de personas a las que vamos a analizarle lso consumos
+# La tabla de cantidad de gente deberia ser esta la base
+
 # Armamos las variables
 TOPEDIAS = 10
 
 # Armamos las categorias
-SOCIOS$CATEGORIA = ifelse(SOCIOS$RESTA >= 0 & SOCIOS$RESTA <= TOPEDIAS, "OK", ifelse(SOCIOS$RESTA <0, "ALTA_ANTERIOR_SOLICITUD", "ALTA_MAS10_DIAS"))
+SOCIOS$CATEGORIA = ifelse(is.na(SOCIOS$RESTA), "DNI sin DID_SOCIO", ifelse(SOCIOS$RESTA >= 0 & SOCIOS$RESTA <= TOPEDIAS, "OK", ifelse(SOCIOS$RESTA <0, "Alta Anterior Solicitud", "Alta + 10 días")))
 
-# Grafico fue dado de alta o no puede stacked bar aperturado por menor menos 6 y mayor a menos 6
-
-# Una tabla especificando todo de rows menor a menos 6 y mayor a menos 6 y variables, cant de socios, cant de socios identificados en DSOCIOS, cantidad que ingresaron somos socios, cantidad que consumieron la operacion y todo bien explicito
-# Consumos de oftalmologia
+# Entonces grafico de barra de 4 categorias y puedo hablar de personas porque tenemos identificados ya 
+# un registro por persona
 
 
-# Filtramos unicamente los que sean OK
-SOCIOS = SOCIOS %>% dplyr::filter(CATEGORIA=="OK")
+df_stacked <- SOCIOS %>%
+  mutate(
+    CATEGORIA = ifelse(is.na(CATEGORIA), "NA", CATEGORIA),
+    PREGUNTA_14 = ifelse(is.na(PREGUNTA_14), "NA", PREGUNTA_14)
+  ) %>%
+  count(CATEGORIA, PREGUNTA_14)
+
+plot_ly(df_stacked,
+        x = ~CATEGORIA,
+        y = ~n,
+        color = ~PREGUNTA_14,
+        type = "bar",
+        text = ~paste0("Categoría: ", CATEGORIA,
+                       "<br>Pregunta 14: ", PREGUNTA_14,
+                       "<br>Cantidad: ", format(n, big.mark = ".", decimal.mark = ",")),
+        hoverinfo = "text") %>%
+  layout(
+    barmode = "stack",
+    title = "Categorías de Socios por Dioptrías",
+    xaxis = list(title = "Categoría"),
+    yaxis = list(title = "Cantidad")
+  )
+
+```
+
+
+Si queremos analizar si se encuentra el DNI en la base de Socios sin importar las fechas de solicitud podríamos agrupar en dos categorías y visualizarlo de la siguiente manera:
+
+```{r}
+
+SOCIOS$CATEGORIA2 = ifelse(SOCIOS$CATEGORIA=="DNI sin DID_SOCIO", "Sin DID Socio", "Con DID Socio")
+
+
+# Preparar los datos
+df_pie <- SOCIOS %>%
+  mutate(CATEGORIA2 = ifelse(is.na(CATEGORIA2), "NA", CATEGORIA2)) %>%
+  count(CATEGORIA2) %>%
+  mutate(porcentaje = n / sum(n),
+         etiqueta = paste0(
+           CATEGORIA2, "<br>",
+           "Cantidad: ", format(n, big.mark = ".", decimal.mark = ","), "<br>",
+           "Porcentaje: ", sprintf("%.1f%%", porcentaje * 100))
+  )
+
+# Gráfico de torta
+plot_ly(
+  data = df_pie,
+  labels = ~CATEGORIA2,
+  values = ~n,
+  type = "pie",
+  textinfo = "percent",        # Solo porcentaje en la torta
+  hoverinfo = "text",
+  text = ~etiqueta,
+  marker = list(line = list(color = '#FFFFFF', width = 1))
+) %>%
+  layout(
+    title = "Distribución de Socios según DID",
+    legend = list(
+      x = 1,
+      y = 0.5,
+      yanchor = "middle"
+    ),
+    margin = list(l = 40, r = 160, b = 40, t = 40),
+    height = 500,
+    width = 700
+  )
+
+
+# Una vez que mostras esa visualizacion vamos a empezar a trabajar con los did_socio que encontro y dieron OK
+# Y eso lo vamos a aperturar por la PREGUNTA_14
+
+PARA_CONSUMO = SOCIOS %>% dplyr::filter(CATEGORIA=="OK")
+
+```
+
+
+## Análisis en Consumos de Socios coincidentes
+
+Tomando únicamente la categoría 3 "OK" en la cuál coinciden los N° de Documento y la Fecha de Vigencia de la Solicitud con la Fecha de alta nos quedan `r scales::comma(n_distinct(PARA_CONSUMO$DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ",")` personas.
+Tomando sus consumos pudimos obtener el siguiente cuadro de análisis, teniendo en cuenta que para la variable de operaciones filtramos por los siguientes DCOD_PRACTICAS:
+
+
+- 20467: MODULO DE CIRUGIA REFRACTIVA(LASIK/LASEK): EXCIMER LASER EN MIOPIA Y ASTIGMATISMO-UNILAT
+
+- 20169: MODULO DE COLOCACION DE LENTE INTRAOCULAR PARA ALTA MIOPIA (UNILATERAL).
 
 
 
+```{r}
 
-# Vemos si hay duplicados 
-#sum(duplicated(SOCIOS$DNUM_DOCUMENTO))
+# Aca ya estamos trabajando con los socios que pudimos a partir de su DOCUMENTO encontrar su DID_SOCIO que tiene
+# coincidente la fecha de vigencia con la fecha de alta
+# Este es nuestro universo total de personas a analizar los consumos
 
-# Una vez chequeado que no hay duplicados vamos a buscar los consumos
 
-# query para traer los consumos a nivel socio-practica/medicamento
+# Vamos a crear nuestro dataframe para analizar
+# Crear dataframe base con las dos categorías
+DIOP <- data.frame(
+  Dioptrías = unique(PARA_CONSUMO$PREGUNTA_14)
+)
+
+
+# Segunda variable vamos a habler el table de cantidad de personas
+PERSONAS = as.data.frame(table(PARA_CONSUMO$PREGUNTA_14))
+
+
+# Vamos a hacer el left join
+DIOP = DIOP %>% left_join(PERSONAS, by=c("Dioptrías"="Var1"))
+names(DIOP)[2] <- "Cantidad Personas"
+
+
+
+# Podemos hablar de porcentajes primera variable seria PREGUNTA_14 que va a adoptar dos valores
+# La segunda variable es cantidad de personas 
+# La tercera variable seria PROMEDIO MENSUAL de CONSUMOS / MESES (agrupado por persona y por categoria PREGUNTA_14) de OFTALMOLOGIA
+# La cuarta variable es % de uso de esa cirugia que vimos 
+# La quinta promedio de CMG por grupo
+
+
+
+# Histograma de consumos 
+
+
+
+# Traemos los consumos
 query_consumos_socios_preexistencias <- paste0("SELECT CO.DID_SOCIO
 	  ,CO.DID_NOMENCLADOR
 	  ,CO.DID_MEDICAMENTO
@@ -762,33 +1083,125 @@ query_consumos_socios_preexistencias <- paste0("SELECT CO.DID_SOCIO
 # Deberiamos filtrar por la fecha de vigencia
 
 
-
-CONSUMOS <- sqlQueryIn(odbcConnect("datamart"), as.character(SOCIOS$DID_SOCIO), query_consumos_socios_preexistencias)
-
-
+# Traemos los consumos
+CONSUMOS <- sqlQueryIn(odbcConnect("datamart"), as.character(PARA_CONSUMO$DID_SOCIO), query_consumos_socios_preexistencias)
 
 
+# Vamos a pegarle el campo que nos interesa a CONSUMOS para ir filtrando
+CONSUMOS = CONSUMOS %>% left_join(PARA_CONSUMO[,c("DID_SOCIO","PREGUNTA_14")], by=c("DID_SOCIO"))
+# Tiene 390074 lineas
 
 
-# Tenemos 1936 registros ahora tenemos que identificar que DID_SOCIO corresponde a ese DNI con esa solicitud
-# Porque un mismo DNI puede tener más de un DID_SOCIO, pero necesitamos ese DID_SOCIO para obtener los consumos 
-# Tenemos 3 escenarios, los que la fecha de vigencia coincide con la fecha de alta o varía en + 10 dias (menos no puede ser) 
-# Los que la fecha de alta es anterior a la fecha de vigencia (no corresponde tomarlos)
-# Los que la fecha de alta es posterior a mas de 10 dias de la fecha de vigencia (no lo vamos a tomar)
+# Filtramos los consumos con OFT en DDES_GRUPO_PRESUPUESTO
+CONSUMOS_OFT <- CONSUMOS %>% filter(str_detect(DDES_GRUPO_PRESUPUESTO, "OFT"))
 
 
-# Vamos a hacer un ifelse con 3 categorias sobre la variable resta
-#SOCIOS$CATEGORIA = ifelse()
+# Tenemos con consumos en general
+CONSUMOSGRAL = CONSUMOS %>%
+  group_by(PREGUNTA_14) %>%
+  summarise(Socios_Distintos = n_distinct(DID_SOCIO)) %>%
+  arrange(desc(Socios_Distintos))
+
+# Cruzamos
+DIOP = DIOP %>% left_join(CONSUMOSGRAL, by=c("Dioptrías"="PREGUNTA_14"))
+names(DIOP)[3] <- "Personas con Consumo"
 
 
+# Consumos en OFTALMOLOGIA
+CONSUMOSOFT = CONSUMOS_OFT %>%
+  group_by(PREGUNTA_14) %>%
+  summarise(Socios_Distintos = n_distinct(DID_SOCIO)) %>%
+  arrange(desc(Socios_Distintos))
 
-# Mostramos una tabla con la definicion y continuamos con el escenario 1 
-# Hay que revisar nuevamente que tengamos un did_socio por cada dni una vez que nos quedemos con el escenario 1
-# Una vez con eso seguimos 
+# Cruzamos
+DIOP = DIOP %>% left_join(CONSUMOSOFT, by=c("Dioptrías"="PREGUNTA_14"))
+names(DIOP)[4] <- "Personas con Consumo en OFT"
 
 
+# Identificamos con la operacion
+CONSUMOSOP = CONSUMOS %>%
+  group_by(PREGUNTA_14) %>%
+  filter(DCOD_PRACTICA %in% c(20467, 20169)) %>% 
+  summarise(Socios_Distintos = n_distinct(DID_SOCIO)) %>%
+  arrange(desc(Socios_Distintos))
+
+# Cruzamos
+DIOP = DIOP %>% left_join(CONSUMOSOP, by=c("Dioptrías"="PREGUNTA_14"))
+names(DIOP)[5] <- "Personas con Operacion Refractiva"
+
+
+# % Operado
+DIOP$Porcentaje = DIOP[,5] / DIOP[,2]
+DIOP$Porcentaje <- sprintf("%.2f%%", DIOP$Porcentaje * 100)
+names(DIOP)[6] <- "% Operado Sobre total del Grupo"
+
+
+# Ahora vamos a calcular el costo promedio entre los dos grupos en oftalmologia
+CONSUMOS_OFT_RESUMEN <- CONSUMOS_OFT %>%
+  mutate(
+    MES = substr(as.character(DNUM_FECHA), 1, 6)  # Extrae el año y mes (YYYYMM)
+  ) %>%
+  group_by(DID_SOCIO, PREGUNTA_14) %>%
+  summarise(
+    CANT_MESES = n_distinct(MES),  # Cuenta los meses únicos de consumo
+    SUMA_IMPORTE = sum(IMPORTE_TOTAL, na.rm = TRUE)
+  ) %>%
+  ungroup()
+
+# Ahora sacamos el promedio MENSUAL de gasto por socio
+CONSUMOS_OFT_RESUMEN$PROMEDIO_MENSUAL = CONSUMOS_OFT_RESUMEN$SUMA_IMPORTE / CONSUMOS_OFT_RESUMEN$CANT_MESES
+
+# Sacamos el promedio por grupo
+PROMEDIO_X_GRUPO <- CONSUMOS_OFT_RESUMEN %>%
+  group_by(PREGUNTA_14) %>%
+  summarise(
+    PROMEDIO_GASTO_MENSUAL = mean(PROMEDIO_MENSUAL, na.rm = TRUE)
+  )
+
+
+# Cruzamos
+DIOP = DIOP %>% left_join(PROMEDIO_X_GRUPO, by=c("Dioptrías"="PREGUNTA_14"))
+names(DIOP)[7] <- "Promedio de Consumos Mensuales por Grupo"
+
+
+# Y si traemos las contribuciones Marginales y hacemos lo mismo que con los consumos?
+# Primero el kable de la tabla bien
+
+
+# Formateamos la tabla 
+DIOP[[7]] <- paste0("$ ", format(round(DIOP[[7]]), big.mark = ".", decimal.mark = ","))
+
+DIOP[2:4] <- lapply(DIOP[2:4], function(x) format(x, big.mark = ".", decimal.mark = ","))
+
+
+# Graficamos
+DIOP %>%
+  kbl(
+    caption = "<b>Consumos y Operaciones Refractivas por Grupo de Dioptrías</b>",
+    format = "html",
+    align = c("l", rep("r", ncol(DIOP) - 1)),
+    col.names = c(
+      "Dioptrías",
+      "Cantidad Personas",
+      "Personas con Consumo",
+      "Personas con Consumo en OFT",
+      "Personas con Operación Refractiva",
+      "% Operado sobre total del Grupo",
+      "Promedio Consumos Mensuales en Oftalmología"
+    )
+  ) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped", "hover", "condensed"),
+    position = "center"
+  ) %>%
+  row_spec(0, background = "#0072CE", color = "white")
 
 ```
+
+
+
+
 
 
 
@@ -808,6 +1221,9 @@ CONSUMOS <- sqlQueryIn(odbcConnect("datamart"), as.character(SOCIOS$DID_SOCIO), 
 # - Tambien promedio de CMG de ese grupo para entender si afecta (porque obviamente a esos le sube el devengado capaz da bien igual)
 # - Explicitar que no se toma la suma de consumos porque algunos entraron hace un mes otros hace años no tiene sentido, ademas que no se pueden comparar con los que se operaron de miopía y no tuvieron preexistencia.
 # Podemos sacarlo sumando los consumos y diviendo por la cantidad de meses.
+
+
+
 
 ```
 
