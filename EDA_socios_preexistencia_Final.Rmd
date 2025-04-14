@@ -665,7 +665,11 @@ Recapitulando el análisis tenemos un dataframe filtrado con:
 
 - Pregunta_9: ¿Tenés o tuviste alguna de las siguientes patologías? = Dificultades en la visión
 - Pregunta_8: ¿Qué patología de visión presenta?                    = Miopía
-- Pregunta_14: Graduación de miopía                                 = Igual o mayor a -6 dioptrías
+
+
+Y trabajaremos sobre la apertura del siguiente campo:
+
+- Pregunta_14: Graduación de miopía                                 
 
 
 Sobre ese dataframe, que cuenta con `r scales::comma(df_vision %>% nrow(), big.mark = ".", decimal.mark = ",")` registros, identificamos `r scales::comma(n_distinct(df_vision$DNUM_DOCUMENTO), big.mark = ".", decimal.mark = ",")` DNI únicos. A partir de esta base, analizaremos sus consumos y contribuciones marginales, teniendo en cuenta que la fecha de alta del socio debe ser posterior a la fecha de vigencia establecida en el Formulario.
@@ -712,6 +716,7 @@ df_vision_filtrado_FV %>%
 Debido a esta sitación nos vemos obligados a realizar el análisis pero en vez de por FECHA_VIGENCIA utilizaremos la FECHA_CREACION, una vez que avanzamos con esta definición nos encontramos que también el formulario apertura por la PREGUNTA_31 y por la PREGUNTA_24:
 
 - Pregunta_31: ¿Que cirugía del listado?
+- Pregunta_24: ¿Cuál fue la intervención Ginecológica? y ¿Cuál fue su diagnóstico?
 
 ```{r}
 # Por lo tanto vamos a usar la FECHA CREACION
@@ -747,7 +752,7 @@ PREGUNTA_31_DF %>%
 
 ## Casos particulares II
 
-Dado que para el análisis de consumos la variable PREGUNTA_31 no resulta relevante, decidimos continuar con el análisis prescindiendo de ella. Sin embargo, nos encontramos con dos casos particulares en los que, si bien comparten la misma última FECHA_CREACION, presentan dos FECHA_VIGENCIA distintas. Como utilizaremos esta última variable para realizar el cruce con los consumos, se definió tomar, en estos casos, la última FECHA_VIGENCIA registrada.
+Dado que para el análisis de consumos la variable PREGUNTA_31 y PREGUNTA_24 no resulta relevante, decidimos continuar con el análisis prescindiendo de ella. Sin embargo, nos encontramos con dos casos particulares en los que, si bien comparten la misma última FECHA_CREACION, presentan dos FECHA_VIGENCIA distintas. Como utilizaremos esta última variable para realizar el cruce con los consumos, se definió tomar, en estos casos, la última FECHA_VIGENCIA registrada.
 
 
 ```{r}
@@ -795,6 +800,11 @@ Una vez que nos quedamos con la última FECHA_VIGENCIA tenemos que obtener el DI
 
 
 ```{r}
+
+# REVISAR FECHA DE VIGENCIA QUE NO SEA LA DSOCIOS PORQUE TENEMOS DE 2009
+
+
+
 # Nos quedamos con la ultima FECHA VIGENCIA
 df_vision_filtrado <- df_vision_filtrado %>%
   group_by(DNUM_DOCUMENTO, FECHA_CREACION_ULTIMA, PREGUNTA_14) %>%
