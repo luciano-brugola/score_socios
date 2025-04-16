@@ -459,7 +459,7 @@ Realizando el análisis de la base concluímos que podríamos tomar algunos conc
 En el siguiente gráfico se aprecia esta hipótesis, primero identificamos todas las variables que comiencen con PREGUNTA_, luego se calcula cuántas de esas preguntas están vacías (NA) por cada fila y se transforma en un porcentaje.
 Los valores sobre las barras indican la cantidad de registros en cada grupo:
 
-```{r,eval=FALSE}
+```{r,eval=TRUE}
 columnas_DDJJ <- names(df_original)[str_detect(string = names(df_original), pattern = "PREGUNTA_")]
 
 df_original$Cant_Preguntas_NA <- apply(df_original[, columnas_DDJJ], 1, function(x) sum(is.na(x)))
@@ -758,9 +758,14 @@ Dado que para el análisis de consumos la variable PREGUNTA_31 y PREGUNTA_24 no 
 df_vision_filtrado = df_vision_filtrado %>% ungroup() %>%  distinct(DNUM_DOCUMENTO, FECHA_VIGENCIA, FECHA_CREACION_ULTIMA, PREGUNTA_14) 
 
 # Aca mostramos lo que aparece casos especiales a tener en cuenta
-PROBLEMA = df_vision_filtrado %>%
+PROBLEMA = df_vision %>%
   group_by(DNUM_DOCUMENTO) %>%
-  filter(n() > 1)
+  mutate(FECHA_CREACION_ULTIMA = max(FECHA_CREACION, na.rm = TRUE)) %>%
+  ungroup() %>% 
+  filter(FECHA_CREACION_ULTIMA == FECHA_CREACION) %>% 
+  distinct(DNUM_ID_SOLICITUD,DNUM_DOCUMENTO, FECHA_VIGENCIA, FECHA_CREACION_ULTIMA, PREGUNTA_14) %>%
+  group_by(DNUM_DOCUMENTO) %>%
+  filter(n_distinct(DNUM_ID_SOLICITUD) > 1,n_distinct(FECHA_VIGENCIA) > 1)
 
 old_locale <- Sys.getlocale(category = "LC_TIME")
 invisible(x = Sys.setlocale("LC_TIME", "Spanish_Argentina.UTF-8"))
@@ -781,7 +786,7 @@ PROBLEMA %>%
     caption = "<b>DNI con una misma Fecha de Creación y dos Fechas de Vigencia</b>", 
     format = "html", 
     align = "c", 
-    col.names = c("DNI", "Fecha de Vigencia", "Última Fecha Creación", "Pregunta 14")
+    col.names = c("ID Solicitud","DNI", "Fecha de Vigencia", "Última Fecha Creación", "Pregunta 14")
   ) %>%
   kable_styling(
     full_width = TRUE,
@@ -792,11 +797,6 @@ PROBLEMA %>%
 
 # kable de la tabla y continuamos
 ```
-
-## Casos particulares III
-
-Una vez que nos quedamos con la última FECHA_VIGENCIA tenemos que obtener el DID_SOCIO correspondiente a ese N° de Documento con ese ID de Solicitud relacionado, por lo tanto al cruzar con la tabla DSOCIOS nos encontramos que para una misma Fecha de Alta (que coincide con la Fecha de Vigencia del Formulario) tenemos 13 DNI que tienen al menos 2 DID_SOCIO relacionados, los mismos se detallan a continuación y a la espera de definiciones se descartan para el análisis: 
-
 
 ```{r}
 
@@ -1095,10 +1095,11 @@ query_consumos_socios_preexistencias <- paste0("SELECT SO.DNUM_IC
 
 # Deberiamos filtrar por la fecha de vigencia
 
-tic()
-# Traemos los consumos
-CONSUMOS <- sqlQueryIn(odbcConnect("datamart"), as.character(PARA_CONSUMO$DNUM_IC), query_consumos_socios_preexistencias)
-toc()
+# tic()
+# # Traemos los consumos
+# CONSUMOS <- sqlQueryIn(odbcConnect("datamart"), as.character(PARA_CONSUMO$DNUM_IC), query_consumos_socios_preexistencias)
+# toc()
+load(file = "Consumos_socios.RDATA")
 
 load("Z:/Gcia Presupuesto/DATA MINING/procesos/cmg/data/precioshist.RData")
 precios.hist$MES <- as.yearmon(precios.hist$MES)
@@ -1169,6 +1170,9 @@ plot_ly(
 
 ```
 
+
+
+
 ## Análisis de consumos
 
 Consideraremos los consumos hasta 1 año después de la Fecha de Vigencia y partiendo desde 30 días debido a Alta diferidas. Luego a partir de los consumos pudimos obtener el siguiente cuadro de análisis, teniendo en cuenta que para la variable de operaciones filtramos por los siguientes DCOD_PRACTICAS:
@@ -1185,6 +1189,7 @@ CONSUMOS_SOCIOS <- CONSUMOS_SOCIOS %>%
                         dplyr::filter(as.numeric(ymd(DNUM_FECHA)-ymd(FECHA_VIGENCIA)) <= 365,
                                       as.numeric(ymd(DNUM_FECHA)-ymd(FECHA_VIGENCIA)) >= -30)
 
+# Calcular la edad del socio al momento del consumo
 CONSUMOS_SOCIOS$EDAD_SOCIO <- round((ymd(CONSUMOS_SOCIOS$DNUM_FECHA) - ymd(CONSUMOS_SOCIOS$FEC_NACIMIENTO))/365.25,1)
 CONSUMOS_SOCIOS$MAYOR_24 <- ifelse(test = CONSUMOS_SOCIOS$EDAD_SOCIO >= 24,
                                    yes = "Mayor de 24 años",
@@ -1198,7 +1203,7 @@ DIOP <- CONSUMOS_SOCIOS %>%
 
 
 # Segunda variable vamos a habler el table de cantidad de personas
-PERSONAS = CONSUMOS_SOCIOS %>% 
+PERSONAS = PARA_CONSUMO %>% 
               dplyr::group_by(PREGUNTA_14,MAYOR_24) %>% 
               dplyr::summarise(Freq = n_distinct(DNUM_DOC))
 
@@ -1235,8 +1240,8 @@ DIOP = DIOP %>% left_join(CONSUMOSOFT)
 
 # Identificamos con la operacion
 CONSUMOSOP = CONSUMOS_SOCIOS %>%
-  group_by(PREGUNTA_14,MAYOR_24) %>%
   filter(DCOD_PRACTICA %in% c(20467, 20169)) %>% 
+  group_by(PREGUNTA_14,MAYOR_24) %>%
   summarise(Socios_DistintosOP = n_distinct(DNUM_DOC)) %>%
   arrange(desc(Socios_DistintosOP))
 
@@ -1298,7 +1303,7 @@ DIOP %>%
     align = c("l", rep("r", ncol(DIOP) - 1)),
     col.names = c(
       "Dioptrías",
-      "Grupo Etario",
+      "Grupo Etario al momento del consumo",
       "Cantidad Personas",
       "Personas con Consumo",
       "Personas con Consumo en OFT",
